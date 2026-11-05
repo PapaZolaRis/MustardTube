@@ -1,0 +1,4 @@
+Country flag artwork: Twemoji contributors / Twitter, Inc., CC BY 4.0.
+https://github.com/mozilla/twemoji-colr
+https://creativecommons.org/licenses/by/4.0/
+Flags were rasterized and resized for MustardTube. Original font not included.

@@ -1,0 +1,12 @@
+# MustardTube customisable interface palette
+name=Midnight
+background=#0A1120
+background_bottom=#111E34
+surface=#17243A
+surface_alt=#1D3049
+surface_selected=#2A3A51
+text=#F6F5F0
+muted=#A5B5C9
+accent=#F4C65B
+secondary=#77DAC2
+outline=#34455F
