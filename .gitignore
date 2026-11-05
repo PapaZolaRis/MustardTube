@@ -1,0 +1,42 @@
+# Local build and packaging output
+/build/
+/dist/
+/out/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.muxapp
+
+# Device-side and local state (not source)
+**/data/
+**/cache/
+**/tmp/
+**/downloads/
+*.log
+*.pid
+*.part
+*.tmp
+
+# Local credentials and settings
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# IMPORTANT: Do not ignore *.png or *.jpg: MustardTube tracks its
+# country-flag atlas, app artwork, and test image fixtures in Git.
