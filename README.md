@@ -65,7 +65,7 @@ See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md)
 (**not** this source ZIP). In GitHub, choose **Releases** on the repository page
 and open the `v0.9.11-beta.2.1` prerelease.
 
-1. Download `MustardTube-v0.9.11-Beta2.1-MultiDisplay-Andromeda-ARM64-TEST.muxapp`.
+1. Download `MustardTube-v0.9.11-Beta2.1.muxapp`.
 2. Copy the `.muxapp` to the SD card's `ARCHIVE` folder.
 3. On the handheld, use **Applications → Archive Manager** to install it.
 4. Connect Wi-Fi and open MustardTube from **Applications**.
