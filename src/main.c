@@ -1,10 +1,11 @@
 #define _DEFAULT_SOURCE
-/* MustardTube v0.9.11 Beta 2 - sorted Radio, held-D-pad scrolling, in-app guide.
+/* MustardTube v0.9.11 Beta 2.1 - display compatibility preview; original video paths preserved.
    Copyright (c) 2026 MustardTube contributors. MIT licence.
    Home shows genuinely fetched YouTube discovery videos, not invented trending rankings. */
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <SDL_image.h>
+#include "display_compat.h" /* Lightweight resolution/aspect and pointer mapping. */
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1185,14 +1186,14 @@ typedef struct {const char *text; bool heading;} AboutLine;
 static const AboutLine ABOUT_LINES[]={
     {"WELCOME",true},
     {"MustardTube - lightweight video and Internet Radio",false},
-    {"Version 0.9.11 Beta 2 | Developer: PapaZolaRis",false},
+    {"Version 0.9.11 Beta 2.1 | PapaZolaRis",false},
     {"Independent community project for muOS.",false},
     {"",false},
     {"REQUIREMENTS",true},
-    {"Anbernic RG35XX Plus / SP (H700); muOS 2606 Andromeda.",false},
+    {"muOS 2606.0 Andromeda; multiple display formats.",false},
     {"Wi-Fi for online video and radio; stock Wasabi player.",false},
     {"No PortMaster, Google login or API key required.",false},
-    {"Other devices and firmware versions are untested.",false},
+    {"Other devices need community hardware validation.",false},
     {"",false},
     {"INSTALL / UPDATE",true},
     {"1. Copy the .muxapp file to an SD-card ARCHIVE folder.",false},
@@ -1401,7 +1402,7 @@ static void draw_footer(App*a) {
      a->page==RESULTS?(a->more_available?"UP/DOWN Browse    A Details    X More    B Search":"UP/DOWN Browse    A Details    B Search"):
      "A Play    B Back    Y Quality    MENU + START Return";
     print_text(a,FS_11,hint,20,451,t->muted);
-    print_text(a,FS_11,"v0.9.11b2",579,452,t->secondary);
+    print_text(a,FS_11,"v0.9.11b2.1",556,452,t->secondary);
 }
 static void render(App*a) {
     draw_background(a);draw_header(a);
@@ -1705,8 +1706,12 @@ static void handle_event(App*a,SDL_Event*e){
         a->nav_repeat_dir=0;
         if(a->pad&&SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(a->pad))==e->cdevice.which) {
             SDL_GameControllerClose(a->pad);a->pad=find_pad();}break;
-      case SDL_MOUSEBUTTONDOWN:if(e->button.button==SDL_BUTTON_LEFT){int w,h;SDL_GetWindowSize(a->win,&w,&h);
-        mouse_down(a,e->button.x*W/(w?w:W),e->button.y*H/(h?h:H));}break;
+      case SDL_MOUSEBUTTONDOWN:if(e->button.button==SDL_BUTTON_LEFT){
+        int w,h,x,y;SDL_GetWindowSize(a->win,&w,&h);
+        /* A letterboxed 1:1 or 16:9 screen needs viewport offset handling. */
+        if(mt_window_to_logical(mt_viewport(w,h,W,H),e->button.x,e->button.y,W,H,&x,&y))
+            mouse_down(a,x,y);
+      }break;
       case SDL_WINDOWEVENT:if(e->window.event==SDL_WINDOWEVENT_EXPOSED||e->window.event==SDL_WINDOWEVENT_SIZE_CHANGED)a->dirty=true;break;
       default:break;
     }
@@ -1728,7 +1733,12 @@ static void shutdown_app(App*a) {
     IMG_Quit();TTF_Quit();SDL_Quit();
 }
 static bool screenshot(App*a,const char*filename) {
-    SDL_Surface*s=SDL_CreateRGBSurfaceWithFormat(0,W,H,32,SDL_PIXELFORMAT_ARGB8888);if(!s)return false;
+    /* ReadPixels copies physical output pixels, NOT 640x480 logical pixels.
+       Allocate accordingly to prevent overflow on square, HD and FHD devices. */
+    int rw=0,rh=0;
+    if(SDL_GetRendererOutputSize(a->r,&rw,&rh)!=0 || !mt_valid_display(rw,rh))return false;
+    SDL_Surface*s=SDL_CreateRGBSurfaceWithFormat(0,rw,rh,32,SDL_PIXELFORMAT_ARGB8888);
+    if(!s)return false;
     bool ok=SDL_RenderReadPixels(a->r,NULL,SDL_PIXELFORMAT_ARGB8888,s->pixels,s->pitch)==0;
     if(ok)ok=SDL_SaveBMP(s,filename)==0;
     SDL_FreeSurface(s);return ok;
@@ -1739,11 +1749,11 @@ int main(int argc,char**argv) {
     bool handoff=false, resume_player=false, show_results=false, show_style=false, show_about=false, show_radio=false;
     int handoff_kind=0;
     for(int i=1;i<argc;i++) {
-        if(!strcmp(argv[i],"--version")){puts("MustardTube 0.9.11 combined beta (Home categories, Search thumbnails, Internet Radio)");return 0;}
+        if(!strcmp(argv[i],"--version")){puts("MustardTube 0.9.11 Beta 2.1 display compatibility preview (Home categories, Search thumbnails, Internet Radio)");return 0;}
         if(!strcmp(argv[i],"--self-test")){
             if(strlen(keyboard_chars)!=36||HOME_VIDEOS!=4||HOME_CATEGORIES!=6||TCOUNT!=3||NAV_TAB_COUNT!=6){fputs("Self-test FAIL\n",stderr);return 1;}
             if(SEARCH_RESULTS!=40){fputs("Self-test FAIL: result cap\n",stderr);return 1;}
-            puts("MustardTube 0.9.11 Combined self-test PASS: 6 tabs, 6 Home categories, 4 visible Search thumbnails, 40 result cap, 3 themes");return 0;
+            puts("MustardTube 0.9.11 Beta 2.1 self-test PASS: 6 tabs, 6 Home categories, 4 visible Search thumbnails, 40 result cap, 3 themes");return 0;
         }
         if(!strcmp(argv[i],"--show-style"))show_style=true;
         else if(!strcmp(argv[i],"--show-about"))show_about=true;
@@ -1792,8 +1802,35 @@ int main(int argc,char**argv) {
     const char *font=font_location();if(!font){fputs("No installed font. Install fonts-dejavu-core or set MUSTARDTUBE_FONT.\n",stderr);goto done;}
     int sizes[]={11,13,15,19,23,29};
     for(int i=0;i<FS_COUNT;i++){a->fonts[i]=TTF_OpenFont(font,sizes[i]);if(!a->fonts[i]){fprintf(stderr,"TTF font: %s\n",TTF_GetError());goto done;}}
-    a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,W,H,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE);
+    /* Preserve the original 640x480 behaviour on H700 devices. On other
+       Andromeda displays, request the native mode and let SDL's logical size
+       preserve the 4:3 interface without clipping or stretching cards.
+       A fullscreen rejection falls back to the old windowed path. */
+    int screen_w=W,screen_h=H;
+    SDL_DisplayMode display_mode;
+    memset(&display_mode,0,sizeof(display_mode));
+    if(SDL_GetCurrentDisplayMode(0,&display_mode)==0 &&
+       mt_valid_display(display_mode.w,display_mode.h)){
+        screen_w=display_mode.w; screen_h=display_mode.h;
+    }
+    if(screen_w!=W || screen_h!=H){
+        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.1",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
+             screen_w,screen_h,SDL_WINDOW_SHOWN|SDL_WINDOW_FULLSCREEN_DESKTOP);
+        if(!a->win){
+            fprintf(stderr,"Native fullscreen unavailable (%dx%d): %s; falling back to 640x480\n",
+                screen_w,screen_h,SDL_GetError());
+        }
+    }
+    if(!a->win){
+        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.1",SDL_WINDOWPOS_CENTERED,
+            SDL_WINDOWPOS_CENTERED,W,H,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE);
+    }
     if(!a->win){fprintf(stderr,"Window: %s\n",SDL_GetError());goto done;}
+    int actual_w=W,actual_h=H;
+    SDL_GetWindowSize(a->win,&actual_w,&actual_h);
+    MTViewport view=mt_viewport(actual_w,actual_h,W,H);
+    fprintf(stderr,"MustardTube display: detected %dx%d; window %dx%d; logical %dx%d; viewport %d,%d %dx%d\n",
+        screen_w,screen_h,actual_w,actual_h,W,H,view.x,view.y,view.w,view.h);
     a->r=SDL_CreateRenderer(a->win,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     if(!a->r)a->r=SDL_CreateRenderer(a->win,-1,SDL_RENDERER_SOFTWARE);
     if(!a->r){fprintf(stderr,"Renderer: %s\n",SDL_GetError());goto done;}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packages v0.9.11 Combined Beta 2 from an existing known-good v0.9.10 runtime.
+# Non-destructively packages v0.9.11 Radio candidate using the known-good v0.9.10 runtime.
 # Run on the prepared Ubuntu ARM64 cross-compile VM after build-arm64-ubuntu.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -25,7 +25,7 @@ cp packaging/mux_launch.sh "$app/mux_launch.sh"
 chmod 755 "$app/bin/mustardtube" "$app/mux_launch.sh" "$app/scripts/youtube-backend.sh"
 chmod 644 "$app/scripts/radio-backend.js"
 mkdir -p "$root/dist"
-out="$root/dist/MustardTube-v0.9.11-Combined-Beta2-RadioUX-Andromeda-ARM64.muxapp"
+out="$root/dist/MustardTube-v0.9.11-Radio-Visual-DEV-Andromeda.muxapp"
 (cd "$tmp" && zip -qr "$out" MustardTube)
 unzip -tq "$out" >/dev/null
 # Check critical playback dependencies match the base installer exactly.

@@ -1,18 +1,19 @@
 # MustardTube — YouTube & Internet Radio for muOS
 
-**v0.9.11 Combined Beta 2** · **Developed by PapaZolaRis** · Community testing build
+**v0.9.11 Beta 2.1 — Multi-Display Compatibility Candidate** · **Developed by PapaZolaRis** · Community testing build
 
 MustardTube is an unofficial, lightweight, controller-driven YouTube video browser
-and Internet Radio client for the **Anbernic RG35XX Plus and RG35XX SP** on
+and Internet Radio client for devices running
 **muOS 2606.0 Andromeda**. It launches video and radio streams using the
 **stock Wasabi player**—no PortMaster, Google login, YouTube API key or manual
 runtime dependency installation is required for users of the prebuilt package.
 
-> **Beta status:** The ARM64 executable and source tests were checked before
-> this candidate was prepared. Real-world hardware compatibility, individual
-> radio streams, and extended-session stability need community testing.
+> **Beta status:** Native UI/back-end source tests and ARM64 packaging have been
+> checked. This candidate has **not** been validated on all 18 Andromeda devices;
+> compatibility with different SoCs, controller maps, runtimes and Wasabi must
+> be verified on the device. **Beta 2 remains the fallback.**
 
-## Features in Beta 2
+## Features in Beta 2.1
 
 - **Home:** Explore, Popular, For You, Music, Gaming and Tech discovery categories;
   real thumbnails, video titles and channels. These are *search-based* discovery
@@ -33,31 +34,44 @@ runtime dependency installation is required for users of the prebuilt package.
 - **About / User Guide:** Scrollable usage guide, troubleshooting, attribution,
   legal notice and controls.
 
+## Screen adaptation in Beta 2.1
+
+- Automatically detects the screen size using SDL2; on 640x480 devices the
+  working Beta 2 layout is kept unchanged.
+- On 3:2, 1:1, 16:9 and larger 4:3 screens the UI is **centered and scaled
+  without stretching or clipping**. There may be unused side/top margins.
+- Handles pointer selection relative to that viewport, and safely captures
+  native-resolution screenshots.
+- Keeps the same YouTube, Radio and Wasabi processing; **no extra decoder or
+  background processes** are added.
+
+See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md).
+
 ## Compatibility
 
 | Requirement | Status |
 | --- | --- |
-| RG35XX Plus / RG35XX SP | Target devices |
+| RG35XX Plus / RG35XX SP | Existing primary test targets |
 | muOS 2606.0 Andromeda | Target firmware |
 | Stock Wasabi media player | Required, provided by target firmware |
-| Wi-Fi | Required for video and radio streaming |
+| Network connectivity | Required for video and radio; some muOS devices require an external Wi-Fi adapter |
 | PortMaster | Not required |
-| Other H700 models or older muOS versions | Not tested / not supported yet |
+| Other Andromeda-supported devices | Display adaptation provided; **device validation still required** |
+| Older muOS versions | Not targeted |
 
 ## Download and installation
 
 **End users should install the prebuilt `.muxapp` from [Releases](../../releases)**
 (**not** this source ZIP). In GitHub, choose **Releases** on the repository page
-and open the `v0.9.11-beta.2` prerelease.
+and open the `v0.9.11-beta.2.1` prerelease.
 
-1. Download `MustardTube-v0.9.11-Combined-Beta2-RadioUX-Andromeda-ARM64.muxapp`.
+1. Download `MustardTube-v0.9.11-Beta2.1-MultiDisplay-Andromeda-ARM64-TEST.muxapp`.
 2. Copy the `.muxapp` to the SD card's `ARCHIVE` folder.
 3. On the handheld, use **Applications → Archive Manager** to install it.
 4. Connect Wi-Fi and open MustardTube from **Applications**.
 5. If updating from an earlier build, back up its `data` directory first.
 
-For step-by-step testing and controller details, see
-[Beta 2 device test guide](docs/TEST-GUIDE-BETA2.md).
+For device-specific testing see [Beta 2.1 display-compatibility guide](docs/DISPLAY-COMPATIBILITY-BETA2.1.md). For controller details see [Beta 2 guide](docs/TEST-GUIDE-BETA2.md).
 
 ## Core controls
 
@@ -101,6 +115,8 @@ history or other sensitive information** in issues or screenshots.
 - `assets/` — graphics, flag atlas and themes.
 - `tests/`, `scripts/test-*` — regression tests.
 - `docs/` — release history, build instructions and notices.
+
+Run `sh scripts/test-display-compat.sh` for pure screen-fit geometry tests.
 
 The repository contains **source and small assets only**, not bundled yt-dlp,
 Node, Wasabi or player binaries. The prebuilt device installer is published as a

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Non-invasive benchmark of official yt-dlp unpackaged ARM64 build.
-# Usage: bash scripts/benchmark-onedir-device.sh root@DEVICE_IP
+# Usage: bash scripts/benchmark-onedir-device.sh root@192.168.0.32
 set -euo pipefail
 cd "$(dirname "$0")/.."
-HOST="${1:-root@DEVICE_IP}"
+HOST="${1:-root@192.168.0.32}"
 [ -s tools/yt-dlp-onedir/yt-dlp ] || { echo 'Run build-runtime.sh first' >&2;exit 2; }
 REMOTE='/mnt/mmc/ARCHIVE/.mustardtube-runtime-probe'
 TAR="$(mktemp --suffix=.tar.gz)";trap 'rm -f "$TAR"' EXIT
