@@ -1,5 +1,8 @@
 # MustardTube v0.9.11 Beta 2.2 — Radio metadata and background playback experiment
 
+**Historical Beta 2.2 experiment.** The unvalidated/source-only statements below do not describe Beta 2.2.6a. See the [current release notes](RELEASE-0.9.11-BETA2.2.6A.md).
+
+
 **Source candidate only — NOT a ready-to-install `.muxapp`.**
 Based on the supplied **Beta 2.1 MultiDisplay** source. All existing YouTube extraction and video-resolution code stays unchanged. Primary devices: RG35XX Plus and RG35XX SP on **muOS 2606.0 Andromeda**. No Goose/Jacaranda support and no PortMaster requirement for end users.
 

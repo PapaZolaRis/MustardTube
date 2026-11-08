@@ -11,6 +11,7 @@ bash scripts/test-background-radio.sh
 bash scripts/test-radio-mix-volume.sh
 bash scripts/test-radio-ingame-hotkeys.sh
 bash scripts/test-game-volume.sh
+bash scripts/test-beta226a-ui.sh
 bash scripts/test-background-launcher.sh
 bash scripts/test-background-video-handoff.sh
 bash scripts/test-radio-launcher.sh

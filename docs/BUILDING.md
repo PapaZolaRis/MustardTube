@@ -1,67 +1,126 @@
-# MustardTube Beta 2.2 — developer build using Beta 2.1 runtime
+# Building MustardTube v0.9.11 Beta 2.2.6a
 
-This is a **developer-only** guide for the RG35XX Plus / RG35XX SP running
-**muOS 2606.0 Andromeda**. This source cannot be deployed by itself. The
-experimental background-radio feature requires an ARM64 ffplay build and
-on-device verification of its audio route and process survival during game
-launches. Do not replace a working Beta 2.1 install until tests pass.
+This is the developer build procedure for the source release targeting **muOS
+2606.0 Andromeda**, ARM64, on the **RG35XX Plus** and **RG35XX SP**. The
+prebuilt `.muxapp` for this release was successfully tested on both devices;
+your newly compiled build still needs independent testing.
 
-## Required inputs
+## Important distinction: installer versus source
 
-- Known-good Beta 2.1 `.muxapp` installer (provided by the project owner).
-- This Beta 2.2 source tree.
-- Prepared Ubuntu AArch64 cross-compile VM with `aarch64-linux-gnu-gcc`,
-  CMake, Ninja, the ARM64 SDL2, SDL2_ttf, SDL2_image and OpenSSL developer
-  headers and libraries, plus `node`, `pkg-config`, `zip`, `unzip`, `file` and `readelf`.
-- A reviewed source checkout/tarball of FFmpeg that includes `ffplay`; the build
-  script accepts its **absolute directory path**, not a binary URL.
+The GitHub source archive contains project source, documentation, tests and
+small artwork. It **does not** contain compiled `mustardtube`, `radio-hotkeys`,
+`ffplay-radio`, Node.js, yt-dlp or QuickJS. Do not install the source ZIP using
+muOS Archive Manager. End users should download the release's
+`MustardTube-v0.9.11-Beta2.2.6a.muxapp` instead.
 
-## Build on the Ubuntu VM
+The current developer packaging workflow reuses a **known-good Beta 2.1
+`.muxapp`** to preserve its verified Node/yt-dlp/QuickJS runtime. Rebuilding
+only the SDL2 application is not enough for a complete installer.
 
-Run from the source tree:
+## Build prerequisites
 
-```sh
+- A prepared Ubuntu AArch64 cross-compilation VM with `aarch64-linux-gnu-gcc`,
+  Ninja, CMake, `make`, `pkg-config`, `zip`, `unzip`, `file` and `readelf`.
+- ARM64 SDL2, SDL2_ttf, SDL2_image and OpenSSL development headers/libraries.
+- Node.js and Python 3 for the source tests.
+- A compatible Beta 2.1 `.muxapp` baseline retained locally.
+- The reviewed source tree for FFmpeg/ffplay. The tested player was built from
+  FFmpeg 8.1.3; see `tools/FFPLAY_SOURCE.txt`. Respect third-party licences and
+  corresponding-source obligations when distributing compiled software.
+
+## Step 1: Run source tests
+
+From the repository root:
+
+```bash
 bash scripts/test-beta22-source.sh
-bash scripts/build-arm64-ubuntu.sh
-bash scripts/build-background-player-arm64.sh /absolute/path/to/ffmpeg-source
-bash scripts/audit-player-arm64.sh tools/ffplay-radio
-bash scripts/package-beta22-from-beta21-installer.sh /absolute/path/to/MustardTube-v0.9.11-Beta2.1.muxapp
-bash scripts/verify-package.sh dist/MustardTube-v0.9.11-Beta2.2-Radio-BG-EXPERIMENTAL-Andromeda-ARM64.muxapp
+bash scripts/test-beta226a-ui.sh
 ```
 
-The packaging script reuses the runtime from Beta 2.1 and replaces only the
-native UI, launch scripts, and necessary new files. It verifies Node, yt-dlp
-and QuickJS are unchanged. It refuses to package a missing or non-ARM64 player.
+The suite covers radio process lifecycle, background audio controller,
+identity-checked game mixing and restoration, controller shortcuts, Home,
+Search, recorded/live video backend handoff, cache, and display geometry.
+These are host-side regressions, **not** a substitute for device tests.
 
-## Compatibility audit
+## Step 2: Cross-compile the UI and game-audio helper
 
-The `audit-player-arm64.sh` script rejects an audio decoder dynamically linked
-to `libav*`/`libsw*` libraries that are not bundled by this packaging workflow.
-It prints any other dynamic dependencies for verification against **stock
-Andromeda**, and checks the highest requested GLIBC symbol version against the
-known device baseline (2.44 reported by the test device). Passing this static
-audit is not proof that playback works: dynamic libraries, PipeWire audio,
-muOS process management and simultaneous game audio require device testing.
+```bash
+bash scripts/build-arm64-ubuntu.sh
+bash scripts/build-radio-hotkeys-arm64.sh
+```
 
-## First handheld test
+Outputs:
+- `build-arm64-ubuntu/mustardtube` — native SDL2 UI
+- `tools/radio-hotkeys` — optional in-game evdev/PipeWire control helper
 
-1. Back up the installed Beta 2.1 app and its `data` directory. Install Beta
-   2.2 only on a test device/card. Keep the original `.muxapp` for rollback.
-2. Play radio normally with **A**. Inspect whether Wasabi actually renders the
-   station name or a visualiser. Named M3U metadata is a *request*, not a
-   guarantee of a visible title. Confirm direct stream fallback.
-3. Press **START** on a station. Confirm the station name appears in the Radio
-   page and audio is audible. If there is silence, inspect a redacted log and
-   the player dynamic libraries. Do not proceed assuming background audio works.
-4. Exit to muOS, start a lightweight GB/SNES game, and check radio plus game
-   audio. Then test Pickles / RetroArch and more demanding games separately.
-5. Return to MustardTube and press **SELECT** to stop. Check no radio remains.
-   Starting a foreground radio or YouTube video should also stop the background
-   radio first.
-6. Test shutdown, Wi-Fi loss, reconnecting, RG35XX SP lid behaviour and
-   long playback sessions. There is no global in-game radio hotkey or guaranteed
-   reconnect in this experimental version.
+## Step 3: Build or reuse the ARM64 audio-only player
 
-Privacy: do not share signed video URLs or complete radio stream URLs from
-logs. Stop/status state stores station name, PID, and binary identity, not
-stream credentials.
+If `tools/ffplay-radio` is not already present from your audited ARM64 build:
+
+```bash
+bash scripts/build-background-player-arm64.sh /absolute/path/to/ffmpeg-8.1.3
+```
+
+Validate the compiled player and its linked libraries:
+
+```bash
+bash scripts/audit-player-arm64.sh tools/ffplay-radio
+```
+
+The static audit checks architecture, dependencies and GLIBC symbol version.
+Passing it alone cannot establish compatibility with stock muOS, PipeWire,
+playing games, or device-specific power management.
+
+## Step 4: Package using the proven runtime baseline
+
+```bash
+bash scripts/package-beta22-from-beta21-installer.sh \
+  /absolute/path/to/MustardTube-v0.9.11-Beta2.1.muxapp
+
+bash scripts/verify-package.sh \
+  dist/MustardTube-v0.9.11-Beta2.2.6a-DualMixer-StaleSessionFix-UI-EXPERIMENTAL-Andromeda-ARM64.muxapp
+```
+
+This script deliberately creates the **long-named developer installer** used
+for Beta 2.2.6a validation. It checks that the compiled executables are
+current and ARM64, copies the existing stable runtime from Beta 2.1, and
+checks that its runtime executables remain unmodified.
+
+The official GitHub release asset uses the shortened external filename
+`MustardTube-v0.9.11-Beta2.2.6a.muxapp`. Its **internal installer content is
+unchanged** from the developer installer. Use the separately provided release
+packaging script to export that filename and generate checksums; do not rename
+source files or edit the binary to change the release name.
+
+**Do not use `scripts/package-muxapp.sh` to make the Beta 2.2.6a installer.**
+That is a retained historical v0.9.9 packager and is not the current pipeline.
+
+## Step 5: Test the newly built installer on hardware
+
+- Back up installed MustardTube app data and keep the validated previous
+  installer as a fallback.
+- Validate radio foreground/background playback and the stock Wasabi video
+  handoff on both RG35XX Plus and SP.
+- In **RADIO+GAME** mode, test game and radio sliders, L2+R2+direction hotkeys,
+  hold repeat and slider synchronization with a known game such as PPSSPP.
+- Stop radio through the UI and confirm the managed game stream returns to
+  100% on a supported game-relaunch workflow. Do not change global master
+  audio volume or unrelated streams.
+- Test game performance, distorted or missing sound, sleep/lid behavior,
+  Wi-Fi interruptions and normal app exit.
+
+## Repository documentation
+
+- `README.md` — current feature overview and installation
+- `docs/RELEASE-0.9.11-BETA2.2.6A.md` — tested release scope
+- `docs/RELEASE-0.9.11-BETA2.2-RADIO-BACKGROUND-EXPERIMENTAL.md` — historical
+  early Beta 2.2 design, **not current behavior**
+- `docs/RADIO-VISUALS-DEV.md` — historical radio-artwork work, **not current
+  release status**
+
+## Privacy and distribution
+
+Never publish signed stream URLs, personal searches, passwords, Wi-Fi keys,
+or runtime data from an installed device. Preserve third-party software and
+artwork notices. GPL/LGPL obligations for the bundled FFmpeg-derived player
+and other components must be reviewed before redistributing the installer.

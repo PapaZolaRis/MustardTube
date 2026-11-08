@@ -1,5 +1,8 @@
 # MustardTube v0.9.11: country flags and radio station artwork (development source)
 
+**Historical development notes (early radio visual patch).** The source-only and Wasabi-only status below described that older patch; for the current tested Beta 2.2.6a release, see [README](../README.md) and [release notes](RELEASE-0.9.11-BETA2.2.6A.md).
+
+
 **Status:** source integration and offline tests completed. This is not a released .muxapp. Build and RG35XX Plus/SP hardware validation remain required.
 
 ## Country flags
