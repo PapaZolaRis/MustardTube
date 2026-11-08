@@ -1,161 +1,187 @@
-# MustardTube — YouTube & Internet Radio for muOS
+# MustardTube — YouTube and Internet Radio for muOS
 
-**v0.9.11 Beta 2.2 — EXPERIMENTAL Radio Display + Background Source** · **Developed by PapaZolaRis** · Community testing build
+**Current release: v0.9.11 Beta 2.2.6a (pre-release)**  
+**Developer: PapaZolaRis**  
+**Target firmware: muOS 2606.0 Andromeda (ARM64)**
 
-MustardTube is an unofficial, lightweight, controller-driven YouTube video browser
-and Internet Radio client for devices running
-**muOS 2606.0 Andromeda**. It launches video and radio streams using the
-**stock Wasabi player**—no PortMaster, Google login, YouTube API key or manual
-runtime dependency installation is required for users of the prebuilt package.
+MustardTube is an unofficial, lightweight, controller-friendly YouTube browser and Internet Radio application for muOS handhelds. It provides video discovery, search and playback, a radio station browser, and a dedicated audio-only radio player that can continue playing while you play games.
 
-> **Experimental source-only status:** This ZIP is based on the Beta 2.1
-> MultiDisplay release and is **not** an installable build. Foreground radio
-> metadata and a separate background-radio controller were added, but **no
-> ARM64 audio-only decoder is included** and simultaneous audio/game playback
-> is unverified. Preserve your working Beta 2.1 installation as the fallback.
-> See [Beta 2.2 release and validation notes](docs/RELEASE-0.9.11-BETA2.2-RADIO-BACKGROUND-EXPERIMENTAL.md).
+Video playback uses the stock **Wasabi** media player. Background radio uses a bundled, dedicated **`ffplay-radio`** player and its controller; it does **not** run Wasabi in the background. The prebuilt `.muxapp` is designed for installation without PortMaster, a Google account, a YouTube API key or manual installation of additional system dependencies.
 
-## Retained features from Beta 2.1
+**[Download Beta 2.2.6a](https://github.com/PapaZolaRis/MustardTube/releases#release-v0.9.11-Beta2.2.6a)** | **[Report an issue](https://github.com/PapaZolaRis/MustardTube/issues)**
 
-- **Home:** Explore, Popular, For You, Music, Gaming and Tech discovery categories;
-  real thumbnails, video titles and channels. These are *search-based* discovery
-  results, not official YouTube Trending rankings. 'For You' uses an optional
-  local history approach, not a YouTube-account recommendation feed.
-- **Search:** Real video thumbnail cards and repeated **X** to load more results,
-  up to 40.
-- **Playback:** 360p default, selectable 480p, and experimental 720p for
-  supported streams through Wasabi. Seeking works on compatible recorded
-  360p/480p streams; **recorded 720p and live streams are not seekable**.
-- **Internet Radio:** Country lists and station names sorted alphabetically,
-  249 bundled country flags, optional small station logos, favourites, station
-  directory paging and stream playback through Wasabi.
-- **Navigation:** Hold D-pad Up/Down for radio list scrolling, Left/Right to
-  jump seven entries, position indication and scroll markers.
-- **Settings:** Midnight, Forest and Paper themes, Clear Cache and Clear
-  Viewing History. Cache maintenance keeps radio favourites.
-- **About / User Guide:** Scrollable usage guide, troubleshooting, attribution,
-  legal notice and controls.
+## Release status and compatibility
 
-## Additional Beta 2.2 experiments
+Beta 2.2.6a is a **public pre-release**, not a stable release. The current release has been built, packaged and tested on both of the following devices:
 
-- **Radio name/metadata:** foreground Wasabi receives a temporary named M3U with `#EXTINF`. Existing direct-stream playback is retained as fallback. Whether Wasabi draws the name or visualiser for a given station remains hardware-dependent.
-- **Radio START:** request audio-only background playback using a separate packaged ARM64 `ffplay-radio`. The MustardTube Radio page displays the station name while that process remains active.
-- **Radio SELECT:** stop the background audio process from inside MustardTube. Stop verifies the process identity to avoid killing unrelated applications.
-- **Background limitations:** requires the separately built/bundled decoder; there is no global in-game hotkey, tested reconnection or verified PipeWire game audio mixing yet. It is *not* Wasabi in the background.
-- **Video safety:** no changes to YouTube search, resolver, recorded/live stream paths or their video player flags.
+| Device | Firmware | Hardware test status |
+| --- | --- | --- |
+| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Passed |
+| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Passed |
 
-## Screen adaptation in Beta 2.1
+Background radio, PPSSPP game-audio mixing, in-game volume shortcuts, automatic game-volume reset, and interface behavior were confirmed during these tests. Compatibility with every emulator or other muOS-supported handheld has **not** been established.
 
-- Automatically detects the screen size using SDL2; on 640x480 devices the
-  working Beta 2 layout is kept unchanged.
-- On 3:2, 1:1, 16:9 and larger 4:3 screens the UI is **centered and scaled
-  without stretching or clipping**. There may be unused side/top margins.
-- Handles pointer selection relative to that viewport, and safely captures
-  native-resolution screenshots.
-- Retains Beta 2.1 scaling while adding an **optional experimental audio-only
-  background process**; ordinary Wasabi/video paths remain intact.
+MustardTube retains the multi-display adaptation introduced in Beta 2.1. The original 640×480 interface is scaled and centered on other supported aspect ratios, including 3:2, 1:1 and 16:9. Unused margins may appear; this is intentional. Scaling has been tested in development, but other display/device combinations still need hardware validation.
 
-See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md).
+Older muOS versions, including Goose and Jacaranda, are not current development targets.
 
-## Compatibility
+## Features
 
-| Requirement | Status |
+### YouTube Home and Search
+
+- Discover videos through **Explore, Popular, For You, Music, Gaming and Tech** categories.
+- Browse thumbnail cards with titles and channel information.
+- Search YouTube from the handheld and press **X** repeatedly to load additional results, up to **40** in total.
+- View video details before starting playback.
+- Home discovery is search-based, not an official YouTube Trending feed. **For You** uses optional local viewing history rather than an account-based YouTube recommendation feed.
+
+### Video playback
+
+- Uses the stock Wasabi player supplied by muOS Andromeda.
+- **360p** is the lightweight default; **480p** can be selected where available.
+- **720p** playback is experimental and works only with compatible streams.
+- Seeking may work on compatible recorded 360p/480p videos. Recorded 720p and live streams are not seekable in the supported workflow.
+- Some videos or stream formats may be unavailable or incompatible with Wasabi.
+
+### Internet Radio
+
+- Browse stations by country; country and station lists are alphabetical.
+- Includes **249** bundled country flags, available station logos, favorites and paginated station results.
+- Uses a built-in audio-only radio player for normal radio listening and background playback.
+- Can continue playing Internet Radio while the user leaves MustardTube and plays games.
+- The **Radio / Now Playing** screen displays station details, radio status and separate volume controls.
+- A Wasabi radio playback option is also available as a fallback for compatible stations.
+- Station availability depends on the broadcaster, network and stream format.
+
+### Independent Radio and Game Volume
+
+Beta 2.2.6a provides separate **Radio Volume** and **Game Volume** sliders in **Radio / Now Playing**. During an active background radio session, the game slider controls a detected, supported game-audio stream while **RADIO+GAME** mode is enabled.
+
+- Radio and game levels can be adjusted independently in 5% steps.
+- In-game volume shortcuts support single-press adjustment and faster press-and-hold repeat.
+- The saved Game Volume preference synchronizes with shortcut adjustments.
+- When background radio stops, MustardTube attempts to restore the **managed game-audio stream to 100%**, including identity-checked recovery in supported game-exit/relaunch cases.
+- Recovery is bounded and best-effort; it is not guaranteed for every game, emulator or delay between exit and relaunch.
+- The 100% reset **does not change the muOS master volume or unrelated applications**.
+
+#### In-game shortcuts
+
+Enable **RADIO+GAME** to control both sources during gameplay.
+
+| Buttons | Action |
 | --- | --- |
-| RG35XX Plus / RG35XX SP | Existing primary test targets |
-| muOS 2606.0 Andromeda | Target firmware |
-| Stock Wasabi media player | Required, provided by target firmware |
-| Network connectivity | Required for video and radio; some muOS devices require an external Wi-Fi adapter |
-| PortMaster | Not required |
-| Other Andromeda-supported devices | Display adaptation provided; **device validation still required** |
-| Older muOS versions | Not targeted |
+| **L2 + R2 + Left** | Radio volume down |
+| **L2 + R2 + Right** | Radio volume up |
+| **L2 + R2 + Up** | Game volume up |
+| **L2 + R2 + Down** | Game volume down |
+
+Each tap changes volume by 5%. Holding the combination repeats the adjustment.
+
+Hotkey modes are **OFF**, **RADIO** (radio-only shortcuts), and **RADIO+GAME** (radio and game shortcuts). The mode can be cycled with **X** on **Radio / Now Playing** or **START** on the **Settings** screen.
+
+Some games or emulators may map these same buttons to their own controls. Test the mapping with your preferred emulator.
+
+### Themes and maintenance
+
+- Three themes: **Midnight**, **Forest** and **Paper**.
+- **Clear Cache** removes disposable cached content while preserving user preferences and radio favorites.
+- **Clear Viewing History** is available separately.
+- Includes an in-app About / User Guide with controls, troubleshooting and legal notices.
 
 ## Download and installation
 
-**This Beta 2.2 source ZIP is not an end-user installer.** Until the new ARM64
-player has been compiled, packaged, and validated on hardware, users should
-continue installing the working Beta 2.1 `.muxapp` from [Releases](../../releases).
+**Latest installer:** `MustardTube-v0.9.11-Beta2.2.6a.muxapp`
 
-1. Download `MustardTube-v0.9.11-Beta2.1-MultiDisplay-Andromeda-ARM64-TEST.muxapp`.
-2. Copy the `.muxapp` to the SD card's `ARCHIVE` folder.
-3. On the handheld, use **Applications → Archive Manager** to install it.
-4. Connect Wi-Fi and open MustardTube from **Applications**.
-5. If updating from an earlier build, back up its `data` directory first.
+1. Visit the [Beta 2.2.6a GitHub pre-release](https://github.com/PapaZolaRis/MustardTube/releases#release-v0.9.11-Beta2.2.6a).
+2. Download `MustardTube-v0.9.11-Beta2.2.6a.muxapp` from the release assets.
+3. Copy the `.muxapp` to the SD card's **`ARCHIVE`** folder.
+4. On the handheld, open **Applications → Archive Manager** and install the package.
+5. Connect to Wi-Fi and launch **MustardTube** from Applications.
+6. For in-game dual volume control, choose **RADIO+GAME** in the radio player or Settings.
 
-For device-specific testing see [Beta 2.1 display-compatibility guide](docs/DISPLAY-COMPATIBILITY-BETA2.1.md). For controller details see [Beta 2 guide](docs/TEST-GUIDE-BETA2.md).
+**Before updating:** Back up the existing MustardTube `data` directory if you want to protect favorites, history and preferences.
 
-## Core controls
+The `.muxapp` is a compiled end-user installer. The separately available **`MustardTube-v0.9.11-Beta2.2.6a-Source.zip`** contains source code and small project assets, **not** the compiled installable application.
+
+## Main controls
 
 | Control | Action |
 | --- | --- |
-| LB / RB | Switch main tabs |
-| D-pad | Navigate |
-| A / B | Select / back |
-| X in Home | Refresh discovery cards |
-| X in Search | Load more results |
-| Y in video details | Change video quality |
-| Radio: Hold Up/Down | Repeat scrolling |
-| Radio: Left/Right | Jump seven entries |
-| Radio: X | Refresh / load more |
-| Radio: Y | Add or remove favourite |
-| Radio: A | Foreground Wasabi radio |
-| Radio: START | Request experimental background radio |
-| Radio: SELECT | Stop background radio (from MustardTube) |
-| Settings: X | Clear temporary cache |
-| Settings: Y | Clear viewing history |
-| About: Up/Down | Scroll guide |
-| About: Left/Right | Page through guide |
-| About: X/Y | Jump between sections |
-| In Wasabi: MENU + START | Return to MustardTube (tested on target configuration) |
+| **LB / RB** | Switch main tabs |
+| **D-pad** | Navigate menus and lists |
+| **A / B** | Select / back |
+| **X on Home** | Refresh discovery cards |
+| **X on Search results** | Load more results |
+| **Y on video details** | Change playback quality |
+| **Radio browser: Hold Up/Down** | Continuous list scrolling |
+| **Radio browser: Left/Right** | Jump through the station or country list |
+| **Radio browser: X** | Refresh countries or load more stations |
+| **Radio browser: Y** | Favorites action |
+| **Radio browser: A on station** | Open built-in radio playback |
+| **Radio browser: START on station** | Start background radio |
+| **Radio browser: SELECT** | Stop background radio |
+| **Radio / Now Playing: Up/Down** | Select Radio Volume or Game Volume |
+| **Radio / Now Playing: Left/Right** | Adjust selected volume by 5% |
+| **Radio / Now Playing: X** | Cycle in-game hotkey mode |
+| **Radio / Now Playing: START** | Exit to the games interface while radio continues |
+| **Radio / Now Playing: SELECT** | Stop radio |
+| **Radio / Now Playing: Y** | Open Wasabi radio fallback |
+| **Radio / Now Playing: B** | Return to station list |
+| **Settings: START** | Cycle hotkey mode |
+| **Settings: X / Y** | Clear Cache / Clear Viewing History |
+| **About: Up/Down** | Scroll guide |
+| **About: X / Y** | Jump between guide sections |
+| **In Wasabi: MENU + START** | Return to MustardTube on tested devices |
 
-## Feedback and issue reports
+The physical button names shown by muOS may differ slightly from the SDL/controller mappings above.
 
-Please use [GitHub Issues](../../issues) to report problems. Include:
+## Performance
 
-- Handheld model and muOS firmware version.
-- Which tab or station/video was involved, and how to reproduce it.
-- Expected and actual behaviour, plus any screenshot.
-- A **redacted** `MustardTube/data/launch.log` if available.
+MustardTube is designed to minimize runtime overhead during gaming. The background radio helper is lightweight, and the game-volume controls target identifiable PipeWire streams rather than modifying global audio settings.
 
-**Never publish signed media URLs, passwords, API credentials, personal search
-history or other sensitive information** in issues or screenshots.
+For faster navigation and searches, the optional per-application **Performance** CPU governor may help. Set it through muOS **Applications → Application Options → Governor**. This can increase battery consumption and heat, and is not required for installation.
 
-## Source tree
+## Known limitations
 
-- `src/` — native SDL2 application, UI and controller handling.
-- `scripts/youtube-backend.sh` — video discovery and playback metadata.
-- `scripts/radio-backend.js` — internet radio directory, filtering, caching.
-- `packaging/` — muOS launch configuration.
-- `assets/` — graphics, flag atlas and themes.
-- `tests/`, `scripts/test-*` — regression tests.
-- `docs/` — release history, build instructions and notices.
+- This is a pre-release tested primarily on the RG35XX Plus and RG35XX SP with muOS Andromeda.
+- Hardware behavior may vary on other devices, display formats and emulators.
+- The interface scales from a 640×480 layout rather than providing separate native layouts for all screens.
+- Some video formats and radio streams may be unavailable or unsupported.
+- Recorded 720p playback is experimental and non-seekable; live streams are non-seekable.
+- A network connection is needed for online video and radio. Some handhelds require an external Wi-Fi adapter.
+- In-game hotkeys may conflict with emulator button mappings.
+- The game-audio reset is limited to identified, managed streams and supported recovery cases.
+- Offline video downloads and automatic CPU governor configuration are not included.
 
-Run `sh scripts/test-display-compat.sh` for pure screen-fit geometry tests.
-Run `bash scripts/test-background-radio.sh` for background process lifecycle tests.
+## Feedback and bug reports
 
-**Important:** `bin/ffplay-radio` is not present in this GitHub source archive.
-See the [Beta 2.2 development notes](docs/RELEASE-0.9.11-BETA2.2-RADIO-BACKGROUND-EXPERIMENTAL.md)
-for cross-compilation and packaging from a known-good Beta 2.1 `.muxapp`.
+Please report issues at **[GitHub Issues](https://github.com/PapaZolaRis/MustardTube/issues)**. Include the device model, muOS version, MustardTube version, game/emulator if relevant, reproduction steps and expected versus actual results.
 
-The repository contains **source and small assets only**, not bundled yt-dlp,
-Node, Wasabi or player binaries. The prebuilt device installer is published as a
-GitHub Release asset.
+Screenshots and a **redacted** `MustardTube/data/launch.log` may help. **Do not publish** passwords, personal search history, signed media URLs, API credentials or other sensitive data.
 
-## Developer builds
+## Source and developer builds
 
-See [Build and packaging notes](docs/BUILDING.md). Cross-compilation requires a
-working AArch64 development environment and SDL2/SDL2_ttf/SDL2_image development
-libraries. **End users installing the `.muxapp` do not need these build tools.**
+The GitHub source archive includes native SDL2 source, JavaScript and shell controllers, tests, packaging scripts, assets and licensing notices. It deliberately omits compiled runtime dependencies, personal device data, generated installers and build output.
+
+Relevant components include:
+
+- `src/main.c` — SDL2 interface and input handling.
+- `src/game_mixer.c`, `src/game_mixer.h` — game-stream volume control and recovery.
+- `src/radio_hotkeys.c` — in-game shortcut handling.
+- `scripts/background-radio.js` — background radio controller.
+- `scripts/radio-backend.js` — station discovery and caching.
+- `scripts/youtube-backend.sh` — YouTube discovery and playback preparation.
+- `scripts/test-game-volume.sh`, `scripts/test-beta22-source.sh` — development regression tests.
+- `assets/`, `packaging/`, `tests/`, `docs/` — assets, packaging, test fixtures and documentation.
+
+Development builds require an appropriately configured AArch64 cross-compilation environment and the project build scripts. The current packaging workflow also uses a compatible baseline `.muxapp` to retain required runtime components. End users installing the release `.muxapp` do not need these developer tools.
 
 ## Legal and third-party notices
 
-This is **unofficial software**, provided **AS IS**, without warranty, to the
-fullest extent permitted by law. Use at your own risk and obey copyright,
-platform terms and applicable law. Not endorsed by YouTube, Google, Anbernic
-or MustardOS. Read [`LICENSE`](LICENSE) (MIT) and
-[`docs/PAPAZOLARIS-USER-NOTICE.txt`](docs/PAPAZOLARIS-USER-NOTICE.txt).
+**UNOFFICIAL SOFTWARE — USE AT YOUR OWN RISK.** MustardTube is provided **AS IS**, without warranty, to the fullest extent permitted by applicable law. Users must comply with applicable law, copyright requirements and third-party platform terms.
 
-Country flag atlas uses Twemoji artwork under CC BY 4.0; see
-[`assets/flags/ATTRIBUTION.txt`](assets/flags/ATTRIBUTION.txt).
-Bundled components in the device installer have their own third-party licences.
+MustardTube is not affiliated with or endorsed by YouTube, Google, Anbernic or MustardOS.
+
+Project source code is distributed under the [MIT License](LICENSE). Third-party binaries and artwork have their own applicable licenses and notices. The bundled flag atlas uses Twemoji artwork under CC BY 4.0; see [`assets/flags/ATTRIBUTION.txt`](assets/flags/ATTRIBUTION.txt). Additional notices are available in [`docs/PAPAZOLARIS-USER-NOTICE.txt`](docs/PAPAZOLARIS-USER-NOTICE.txt).
 
 **Developer:** PapaZolaRis
