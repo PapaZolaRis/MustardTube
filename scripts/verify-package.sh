@@ -8,6 +8,8 @@ names="$(unzip -Z1 "$PKG")"
 for item in MustardTube/mux_launch.sh MustardTube/bin/mustardtube \
   MustardTube/bin/yt-dlp MustardTube/bin/node MustardTube/bin/qjs \
   MustardTube/scripts/youtube-backend.sh \
+  MustardTube/bin/radio-hotkeys \
+  MustardTube/scripts/background-radio.js \
   MustardTube/licenses/QUICKJS_LICENSE.txt MustardTube/licenses/NODE_LICENSE.txt \
   MustardTube/glyph/mustardtube.png \
   MustardTube/grid/mustardtube.png \

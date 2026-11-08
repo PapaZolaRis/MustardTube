@@ -12,6 +12,8 @@ chmod 700 data 2>/dev/null || true
 LOG="$APP_DIR/data/launch.log"
 WASABI="/opt/muos/frontend/muxmedia"
 TEST_VIDEO="$APP_DIR/assets/media/mustardtube-av-test.mp4"
+RADIO_CTL="$APP_DIR/scripts/background-radio.js"
+RADIO_NODE="$APP_DIR/bin/node"
 MUSTARDTUBE_APP_DIR="$APP_DIR"
 MUSTARDTUBE_DATA_DIR="$APP_DIR/data"
 export MUSTARDTUBE_APP_DIR MUSTARDTUBE_DATA_DIR
@@ -21,9 +23,22 @@ if [ -r /opt/muos/share/font/internal/Inter.ttf ]; then
 fi
 resume=""
 while :; do
+    # Refresh the small status marker; the controller verifies PID identity
+    # before trusting an older background state file.
+    if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+        "$RADIO_NODE" "$RADIO_CTL" status > "$APP_DIR/data/radio-background-name.txt" 2>/dev/null || \
+            : > "$APP_DIR/data/radio-background-name.txt"
+    fi
+    # A newly opened MustardTube session must return to the already-running
+    # radio, not Home.  Only a PID-validated, successful status response can
+    # select this route; stale station metadata never does.
+    if [ -z "$resume" ] && [ -s "$APP_DIR/data/radio-background-name.txt" ]; then
+        resume=radio-now
+    fi
     case "$resume" in
     style) ./bin/mustardtube --assets "$APP_DIR/assets" --show-style >> "$LOG" 2>&1;;
     radio) ./bin/mustardtube --assets "$APP_DIR/assets" --show-radio >> "$LOG" 2>&1;;
+    radio-now) ./bin/mustardtube --assets "$APP_DIR/assets" --show-radio-now >> "$LOG" 2>&1;;
     player) ./bin/mustardtube --assets "$APP_DIR/assets" --resume-player >> "$LOG" 2>&1;;
     results) ./bin/mustardtube --assets "$APP_DIR/assets" --show-results >> "$LOG" 2>&1;;
     *) ./bin/mustardtube --assets "$APP_DIR/assets" >> "$LOG" 2>&1;;
@@ -55,6 +70,11 @@ while :; do
                 title='YouTube video'
                 if [ -r "$APP_DIR/data/selected.txt" ]; then
                     title=$(sed -n '2p' "$APP_DIR/data/selected.txt")
+                fi
+                # A foreground video must not overlap a background radio station.
+                # Stop by validated player identity; do not terminate unrelated audio.
+                if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+                    "$RADIO_NODE" "$RADIO_CTL" stop >/dev/null 2>&1 || true
                 fi
                 # Never log the signed stream URL, which could contain private tokens.
                 started=$(date +%s)
@@ -94,7 +114,47 @@ while :; do
         fi
         resume=player
         ;;
-    82) # Country radio: one selected HTTP(S) station URL, no extra audio engine.
+    84) # Experimental audio-only background mode; Wasabi remains foreground-only.
+        if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+            if "$RADIO_NODE" "$RADIO_CTL" start >> "$LOG" 2>&1; then
+                printf '%s\n' 'Background radio requested. Leave MustardTube to launch a game.' > "$APP_DIR/data/radio-background-notice.txt"
+            else
+                printf '%s\n' 'Background radio unavailable; check bundled player and diagnostics.' > "$APP_DIR/data/radio-background-notice.txt"
+            fi
+        else
+            rm -f "$APP_DIR/data/radio-selected.txt"
+            printf '%s\n' 'Background radio service missing from this installer.' > "$APP_DIR/data/radio-background-notice.txt"
+        fi
+        resume=radio-now
+        ;;
+    86) # Native foreground radio: same single ffplay stream, but resume SDL Now Playing.
+        if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+            if "$RADIO_NODE" "$RADIO_CTL" start >> "$LOG" 2>&1; then
+                printf '%s\n' 'Radio is running. Use START to return to games.' > "$APP_DIR/data/radio-background-notice.txt"
+            else
+                printf '%s\n' 'Radio failed to start. Press B to choose another station.' > "$APP_DIR/data/radio-background-notice.txt"
+            fi
+        else
+            rm -f "$APP_DIR/data/radio-selected.txt"
+            printf '%s\n' 'Built-in radio player unavailable on this device.' > "$APP_DIR/data/radio-background-notice.txt"
+        fi
+        resume=radio-now
+        ;;
+    87) # Stop from Now Playing; return to native screen rather than radio directory.
+        if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+            "$RADIO_NODE" "$RADIO_CTL" stop >> "$LOG" 2>&1 || true
+        fi
+        printf '%s\n' 'Radio stopped.' > "$APP_DIR/data/radio-background-notice.txt"
+        resume=radio-now
+        ;;
+    85) # Explicit background stop; no global game hotkey hijacking.
+        if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+            "$RADIO_NODE" "$RADIO_CTL" stop >> "$LOG" 2>&1 || true
+        fi
+        printf '%s\n' 'Background radio stopped.' > "$APP_DIR/data/radio-background-notice.txt"
+        resume=radio
+        ;;
+    82) # Foreground Wasabi radio; preserve video playback paths.
         radio_file="$APP_DIR/data/radio-selected.txt"
         title='Internet Radio'
         stream=''
@@ -106,9 +166,22 @@ while :; do
         case "$stream" in
             http://*|https://*)
                 if [ -x "$WASABI" ]; then
-                    # Wasabi's built-in live-stream decoder; no browser, ffmpeg or PortMaster setup.
-                    "$WASABI" --live --title "$title" "$stream" >/dev/null 2>&1 || \
-                        echo 'Internet radio: player returned a nonzero code.' >> "$LOG"
+                    # Avoid overlapping game/background radio with foreground Wasabi.
+                    if [ -x "$RADIO_NODE" ] && [ -r "$RADIO_CTL" ]; then
+                        "$RADIO_NODE" "$RADIO_CTL" stop >/dev/null 2>&1 || true
+                    fi
+                    # A named M3U can expose station metadata to Wasabi's audio UI.
+                    # Do not pass the station's URL to logging or a shell eval.
+                    title=$(printf '%s' "$title" | tr -d '\r\n' | cut -c 1-105)
+                    playlist="$APP_DIR/data/radio-now-playing.m3u"
+                    umask 077
+                    printf '#EXTM3U\n#EXTINF:-1,%s\n%s\n' "$title" "$stream" > "$playlist"
+                    if ! "$WASABI" --live --title "$title" "$playlist" >/dev/null 2>&1; then
+                        # Preserve compatibility if this Wasabi build rejects M3U.
+                        "$WASABI" --live --title "$title" "$stream" >/dev/null 2>&1 || \
+                            echo 'Internet radio: player returned a nonzero code.' >> "$LOG"
+                    fi
+                    rm -f "$playlist"
                 fi
                 ;;
             *) echo 'Internet radio: invalid station link.' >> "$LOG";;

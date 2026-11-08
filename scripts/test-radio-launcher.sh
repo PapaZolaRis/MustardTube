@@ -24,10 +24,12 @@ sed -e 's@^\. /opt/muos/script/var/func.sh@SETUP_APP() { :; }@' \
  -e "s@^WASABI=.*@WASABI=\"$tmp/wasabi\"@" \
  packaging/mux_launch.sh > "$tmp/launcher.sh"
 MUSTARDTUBE_APP_DIR="$app" sh "$tmp/launcher.sh"
-grep -q -- '--live --title Example Station https://radio.example.org/live.mp3' "$app/data/wasabi-args.txt"
+grep -q -- '--live --title Example Station' "$app/data/wasabi-args.txt"
+# Playlist contains the name and station URL but is removed after player exits.
+[ ! -e "$app/data/radio-now-playing.m3u" ]
 grep -q -- '--show-radio' "$app/data/app-invocations.log"
 [ ! -f "$app/data/radio-selected.txt" ]
 if grep -Fq 'https://radio.example.org/live.mp3' "$app/data/launch.log";then
  echo 'FAIL: stream URL leaked into launcher diagnostics' >&2;exit 1
 fi
-echo 'PASS: radio launcher invokes stock Wasabi, returns to Radio, removes selected URL, avoids URL logging'
+echo 'PASS: named radio playlist is handed to stock Wasabi; temporary URL removed; no URL logging'

@@ -1,6 +1,6 @@
 # MustardTube — YouTube & Internet Radio for muOS
 
-**v0.9.11 Beta 2.1 — Multi-Display Compatibility Candidate** · **Developed by PapaZolaRis** · Community testing build
+**v0.9.11 Beta 2.2 — EXPERIMENTAL Radio Display + Background Source** · **Developed by PapaZolaRis** · Community testing build
 
 MustardTube is an unofficial, lightweight, controller-driven YouTube video browser
 and Internet Radio client for devices running
@@ -8,23 +8,14 @@ and Internet Radio client for devices running
 **stock Wasabi player**—no PortMaster, Google login, YouTube API key or manual
 runtime dependency installation is required for users of the prebuilt package.
 
-> **Public beta:** Beta 2.1 has been tested successfully on an **Anbernic RG35XX Plus
-> (640 × 480)** running muOS 2606.0 Andromeda. Other supported devices, resolutions,
-> controller layouts and hardware families still need community testing. **Beta 2 is
-> retained as a rollback option**, not a separate release required for 640 × 480 screens.
+> **Experimental source-only status:** This ZIP is based on the Beta 2.1
+> MultiDisplay release and is **not** an installable build. Foreground radio
+> metadata and a separate background-radio controller were added, but **no
+> ARM64 audio-only decoder is included** and simultaneous audio/game playback
+> is unverified. Preserve your working Beta 2.1 installation as the fallback.
+> See [Beta 2.2 release and validation notes](docs/RELEASE-0.9.11-BETA2.2-RADIO-BACKGROUND-EXPERIMENTAL.md).
 
-## Which version should I install?
-
-| Release | What it provides | When to use it |
-| --- | --- | --- |
-| **[v0.9.11 Beta 2.1](https://github.com/PapaZolaRis/MustardTube/releases/tag/v0.9.11-beta.2.1)** | All Beta 2 features, plus automatic display-size detection, aspect-preserving scaling, corrected pointer positions and safe screenshot capture at native resolution. | **Recommended beta for testing, including 640 × 480 devices.** Tested successfully on the RG35XX Plus; other hardware is not yet validated. |
-| **[v0.9.11 Beta 2](https://github.com/PapaZolaRis/MustardTube/releases/tag/v0.9.11-beta.2)** | The original 640 × 480 interface with YouTube Home categories, Search thumbnails, country-based Internet Radio, favourites, scrolling and a built-in guide. | **Fallback** if Beta 2.1 introduces a regression on a device where Beta 2 was working. Its fixed-size interface may not fit different aspect ratios correctly. |
-
-**Important:** The RG35XX Plus has a **640 × 480** screen (not 940 × 480). Since Beta 2.1 has been tested on this device and preserves its original layout, users do **not** need to downgrade just because their screen is 640 × 480. When reporting a regression, please include the device model and whether Beta 2 still works.
-
-**Beta 2 history:** Beta 2 introduced the polished Radio country/station interface with alphabetical sorting, held-D-pad navigation and a scrollable About/User Guide. Beta 2.1 is an **incremental display-compatibility update**, not a replacement or redesign of those core features. The app remains an unofficial community beta, and no release is guaranteed to work across every muOS Andromeda-supported device.
-
-## Features shared by Beta 2 and Beta 2.1
+## Retained features from Beta 2.1
 
 - **Home:** Explore, Popular, For You, Music, Gaming and Tech discovery categories;
   real thumbnails, video titles and channels. These are *search-based* discovery
@@ -45,16 +36,24 @@ runtime dependency installation is required for users of the prebuilt package.
 - **About / User Guide:** Scrollable usage guide, troubleshooting, attribution,
   legal notice and controls.
 
-## Additional screen adaptation in Beta 2.1
+## Additional Beta 2.2 experiments
 
-- Automatically detects the screen size using SDL2; on **640 × 480** devices the
+- **Radio name/metadata:** foreground Wasabi receives a temporary named M3U with `#EXTINF`. Existing direct-stream playback is retained as fallback. Whether Wasabi draws the name or visualiser for a given station remains hardware-dependent.
+- **Radio START:** request audio-only background playback using a separate packaged ARM64 `ffplay-radio`. The MustardTube Radio page displays the station name while that process remains active.
+- **Radio SELECT:** stop the background audio process from inside MustardTube. Stop verifies the process identity to avoid killing unrelated applications.
+- **Background limitations:** requires the separately built/bundled decoder; there is no global in-game hotkey, tested reconnection or verified PipeWire game audio mixing yet. It is *not* Wasabi in the background.
+- **Video safety:** no changes to YouTube search, resolver, recorded/live stream paths or their video player flags.
+
+## Screen adaptation in Beta 2.1
+
+- Automatically detects the screen size using SDL2; on 640x480 devices the
   working Beta 2 layout is kept unchanged.
 - On 3:2, 1:1, 16:9 and larger 4:3 screens the UI is **centered and scaled
   without stretching or clipping**. There may be unused side/top margins.
 - Handles pointer selection relative to that viewport, and safely captures
   native-resolution screenshots.
-- Keeps the same YouTube, Radio and Wasabi processing; **no extra decoder or
-  background processes** are added.
+- Retains Beta 2.1 scaling while adding an **optional experimental audio-only
+  background process**; ordinary Wasabi/video paths remain intact.
 
 See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md).
 
@@ -62,8 +61,7 @@ See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md)
 
 | Requirement | Status |
 | --- | --- |
-| RG35XX Plus | **Beta 2.1 tested successfully** by the project maintainer on 640 × 480 hardware |
-| RG35XX SP | Primary target; Beta 2.1 needs separate confirmation on this device |
+| RG35XX Plus / RG35XX SP | Existing primary test targets |
 | muOS 2606.0 Andromeda | Target firmware |
 | Stock Wasabi media player | Required, provided by target firmware |
 | Network connectivity | Required for video and radio; some muOS devices require an external Wi-Fi adapter |
@@ -73,10 +71,9 @@ See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md)
 
 ## Download and installation
 
-**End users should install the prebuilt `.muxapp` from [GitHub Releases](https://github.com/PapaZolaRis/MustardTube/releases)**
-(**not** a ZIP of this source repository). For the latest multi-display test, open
-`v0.9.11-beta.2.1`. If you encounter a new problem, report it and try the separate
-`v0.9.11-beta.2` installer as a fallback after backing up your application data.
+**This Beta 2.2 source ZIP is not an end-user installer.** Until the new ARM64
+player has been compiled, packaged, and validated on hardware, users should
+continue installing the working Beta 2.1 `.muxapp` from [Releases](../../releases).
 
 1. Download `MustardTube-v0.9.11-Beta2.1-MultiDisplay-Andromeda-ARM64-TEST.muxapp`.
 2. Copy the `.muxapp` to the SD card's `ARCHIVE` folder.
@@ -84,16 +81,7 @@ See [Multi-display compatibility testing](docs/DISPLAY-COMPATIBILITY-BETA2.1.md)
 4. Connect Wi-Fi and open MustardTube from **Applications**.
 5. If updating from an earlier build, back up its `data` directory first.
 
-For device-specific testing see the [Beta 2.1 display-compatibility guide](docs/DISPLAY-COMPATIBILITY-BETA2.1.md). For the original controls and Beta 2 behaviour, see the [Beta 2 guide](docs/TEST-GUIDE-BETA2.md).
-
-### If you need to roll back to Beta 2
-
-1. Back up the existing MustardTube `data` folder, particularly your radio favourites and preferences.
-2. Download the **Beta 2** `.muxapp` from its own GitHub prerelease (linked above).
-3. Install via muOS **Applications → Archive Manager**, following the same installation process.
-4. Check whether the issue also occurs in Beta 2, and include the comparison in a [GitHub issue](https://github.com/PapaZolaRis/MustardTube/issues).
-
-Rollback is a troubleshooting option, not a guarantee that downgrading automatically resolves every problem.
+For device-specific testing see [Beta 2.1 display-compatibility guide](docs/DISPLAY-COMPATIBILITY-BETA2.1.md). For controller details see [Beta 2 guide](docs/TEST-GUIDE-BETA2.md).
 
 ## Core controls
 
@@ -109,6 +97,9 @@ Rollback is a troubleshooting option, not a guarantee that downgrading automatic
 | Radio: Left/Right | Jump seven entries |
 | Radio: X | Refresh / load more |
 | Radio: Y | Add or remove favourite |
+| Radio: A | Foreground Wasabi radio |
+| Radio: START | Request experimental background radio |
+| Radio: SELECT | Stop background radio (from MustardTube) |
 | Settings: X | Clear temporary cache |
 | Settings: Y | Clear viewing history |
 | About: Up/Down | Scroll guide |
@@ -118,10 +109,9 @@ Rollback is a troubleshooting option, not a guarantee that downgrading automatic
 
 ## Feedback and issue reports
 
-Please use [GitHub Issues](https://github.com/PapaZolaRis/MustardTube/issues) to report problems. Include:
+Please use [GitHub Issues](../../issues) to report problems. Include:
 
-- Handheld model, muOS firmware version, and MustardTube version (Beta 2 or Beta 2.1).
-- Whether the same problem occurs in the other beta, if tested.
+- Handheld model and muOS firmware version.
 - Which tab or station/video was involved, and how to reproduce it.
 - Expected and actual behaviour, plus any screenshot.
 - A **redacted** `MustardTube/data/launch.log` if available.
@@ -140,6 +130,11 @@ history or other sensitive information** in issues or screenshots.
 - `docs/` — release history, build instructions and notices.
 
 Run `sh scripts/test-display-compat.sh` for pure screen-fit geometry tests.
+Run `bash scripts/test-background-radio.sh` for background process lifecycle tests.
+
+**Important:** `bin/ffplay-radio` is not present in this GitHub source archive.
+See the [Beta 2.2 development notes](docs/RELEASE-0.9.11-BETA2.2-RADIO-BACKGROUND-EXPERIMENTAL.md)
+for cross-compilation and packaging from a known-good Beta 2.1 `.muxapp`.
 
 The repository contains **source and small assets only**, not bundled yt-dlp,
 Node, Wasabi or player binaries. The prebuilt device installer is published as a
@@ -147,7 +142,7 @@ GitHub Release asset.
 
 ## Developer builds
 
-See [Build and packaging notes](docs/BUILDING.md) if present in your repository, as well as the supplied build scripts. Cross-compilation requires a
+See [Build and packaging notes](docs/BUILDING.md). Cross-compilation requires a
 working AArch64 development environment and SDL2/SDL2_ttf/SDL2_image development
 libraries. **End users installing the `.muxapp` do not need these build tools.**
 
@@ -162,9 +157,5 @@ or MustardOS. Read [`LICENSE`](LICENSE) (MIT) and
 Country flag atlas uses Twemoji artwork under CC BY 4.0; see
 [`assets/flags/ATTRIBUTION.txt`](assets/flags/ATTRIBUTION.txt).
 Bundled components in the device installer have their own third-party licences.
-
-## Release and source-version notes
-
-Each release is distributed with its matching `.muxapp` asset. For source snapshots, use the version tag rather than assuming that the current `main` branch always matches an older release. If the GitHub prerelease tag was created *before* its updated source was committed, verify that its tagged source contains the correct version; later commits to `main` do not update an existing tag.
 
 **Developer:** PapaZolaRis

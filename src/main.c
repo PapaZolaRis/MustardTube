@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE
-/* MustardTube v0.9.11 Beta 2.1 - display compatibility preview; original video paths preserved.
+/* MustardTube v0.9.11 Beta 2.2.1 - low-power native radio improvements.
+   Based on the Beta 2.1 display compatibility release; original video paths preserved.
    Copyright (c) 2026 MustardTube contributors. MIT licence.
    Home shows genuinely fetched YouTube discovery videos, not invented trending rankings. */
 #include <SDL.h>
@@ -39,6 +40,10 @@
 #define RADIO_MAX_STATIONS 80
 #define RADIO_MAX_FAVORITES 32
 #define RADIO_PLAY_EXIT 82
+#define RADIO_BACKGROUND_START_EXIT 84
+#define RADIO_BACKGROUND_STOP_EXIT 85
+#define RADIO_NATIVE_START_EXIT 86
+#define RADIO_NATIVE_STOP_EXIT 87
 #define SEARCH_RESULTS 40
 #define YT_MORE_EXIT 80
 #define CLEAR_CACHE_EXIT 81
@@ -50,7 +55,7 @@
 #define KEY_COUNT 39
 #define MAX_QUERY 95
 
-typedef enum { HOME, SEARCH, SAVED, RADIO, STYLE, ABOUT, PLAYER, RESULTS } Page;
+typedef enum { HOME, SEARCH, SAVED, RADIO, STYLE, ABOUT, PLAYER, RESULTS, RADIO_NOW } Page;
 typedef enum { FS_11, FS_13, FS_15, FS_19, FS_23, FS_29, FS_COUNT } FontSize;
 typedef struct {
     char name[32];
@@ -117,6 +122,7 @@ typedef struct {
     Uint32 nav_repeat_at;
     pid_t radio_worker_pid;
     bool radio_loading, radio_handoff;
+    int radio_handoff_kind;
     pid_t radio_logo_pid;
     int radio_logo_mode, radio_logo_first;
     char radio_logo_country[4];
@@ -124,6 +130,18 @@ typedef struct {
     SDL_Texture *radio_logos[7];
     char radio_logo_ids[7][45];
     char radio_selected_country[4], radio_status[130];
+    char radio_background_name[114];
+    RadioStation radio_now_station; /* Safe display metadata only; no stream URL persisted. */
+    bool radio_now_active;
+    bool radio_now_blink; /* One status-dot update/second, only on the native radio screen. */
+    bool radio_now_logo_checked; /* At most one cached image lookup per Now Playing visit. */
+    Uint32 radio_now_last_tick;
+    char radio_now_notice[140];
+    int radio_mix_volume; /* PipeWire stream volume, independent of game audio. */
+    int game_mix_volume; /* Saved preferred game level during active radio. */
+    int radio_now_slider; /* 0 radio, 1 game; D-pad UP/DOWN selects. */
+    bool radio_mix_edit; /* SELECT on Settings toggles lightweight mixer. */
+    int radio_hotkeys_mode; /* 0 OFF, 1 RADIO, 2 RADIO+GAME; no OS edits. */
     char worker_id[16];
     Uint32 play_started;
     int quality;
@@ -318,6 +336,118 @@ static bool write_data_file(App*a,const char *name,const char *data) {
     return ok;
 }
 static void set_page(App*a,Page p);
+/* The mixer is applied by the bundled short-lived Node controller, which
+ * validates its own FFplay process identity before calling wpctl --pid. */
+static void radio_mix_load(App*a){
+    a->radio_mix_volume=75;
+    char path[PATH_MAX];
+    if(snprintf(path,sizeof(path),"%s/radio-mix-volume.txt",a->data_dir)>=(int)sizeof(path))return;
+    FILE*f=fopen(path,"r");
+    if(f){int n=-1;char rest=0;
+        if(fscanf(f,"%d%c",&n,&rest)>=1 && n>=0 && n<=100)a->radio_mix_volume=n;
+        fclose(f);
+    }
+}
+static void game_mix_load(App*a){
+    a->game_mix_volume=100;
+    char path[PATH_MAX];
+    if(snprintf(path,sizeof(path),"%s/game-mix-volume.txt",a->data_dir)>=(int)sizeof(path))return;
+    FILE*f=fopen(path,"r");if(!f)return;
+    int n=-1;char tail='\0';
+    if(fscanf(f,"%d%c",&n,&tail)>=1 && n>=0 && n<=100 &&
+       (tail=='\n'||tail=='\0'))a->game_mix_volume=n;
+    fclose(f);
+}
+static void radio_hotkeys_load(App*a){
+    a->radio_hotkeys_mode=0;
+    char path[PATH_MAX];
+    if(snprintf(path,sizeof(path),"%s/radio-hotkeys-enabled.txt",a->data_dir)>=(int)sizeof(path))return;
+    FILE*f=fopen(path,"r");if(!f)return;
+    int choice=fgetc(f);fclose(f);
+    a->radio_hotkeys_mode=choice=='2'?2:choice=='1'?1:0;
+}
+static bool radio_hotkeys_toggle(App*a){
+    const char*base=getenv("MUSTARDTUBE_APP_DIR");
+    if(!base || !*base || strlen(base)>PATH_MAX-65)return false;
+    char node[PATH_MAX],script[PATH_MAX];
+    snprintf(node,sizeof(node),"%s/bin/node",base);
+    snprintf(script,sizeof(script),"%s/scripts/background-radio.js",base);
+    if(access(node,X_OK)!=0 || access(script,R_OK)!=0)return false;
+    int next=(a->radio_hotkeys_mode+1)%3;
+    char mode[2]={(char)('0'+next),0};
+    pid_t pid=fork();
+    if(pid<0)return false;
+    if(pid==0){
+        execl(node,node,script,"set-hotkeys",mode,(char*)NULL);
+        _exit(127);
+    }
+    int status=0;pid_t result;
+    do{result=waitpid(pid,&status,0);}while(result<0 && errno==EINTR);
+    if(result<0 || !WIFEXITED(status))return false;
+    if(WEXITSTATUS(status)!=0 && WEXITSTATUS(status)!=4)return false;
+    a->radio_hotkeys_mode=next;
+    if(WEXITSTATUS(status)==4){
+        snprintf(a->status_message,sizeof(a->status_message),
+                 "Mode saved; game sound restoration still pending.");
+        snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),
+                 "Game sound restore pending; check mixer state.");
+    }else if(a->page==RADIO_NOW){
+        a->radio_now_notice[0]=0;
+    }
+    a->dirty=true;
+    return true;
+}
+static bool game_mix_set(App*a,int level){
+    if(level<0||level>100)return false;
+    const char*base=getenv("MUSTARDTUBE_APP_DIR");
+    if(!base||!*base||strlen(base)>PATH_MAX-65)return false;
+    char helper[PATH_MAX],value[12];
+    snprintf(helper,sizeof(helper),"%s/bin/radio-hotkeys",base);
+    snprintf(value,sizeof(value),"%d",level);
+    if(access(helper,X_OK)!=0)return false;
+    pid_t pid=fork();if(pid<0)return false;
+    if(pid==0){execl(helper,helper,"--set-game-mix",base,value,(char*)NULL);_exit(127);}
+    int status=0;pid_t rc;
+    do{rc=waitpid(pid,&status,0);}while(rc<0&&errno==EINTR);
+    if(rc<0||!WIFEXITED(status) || (WEXITSTATUS(status)!=0&&WEXITSTATUS(status)!=4))return false;
+    a->game_mix_volume=level;a->dirty=true;
+    return true;
+}
+static bool game_mix_adjust(App*a,int direction){
+    game_mix_load(a);
+    int level=a->game_mix_volume+direction*5;
+    if(level<0)level=0;
+    if(level>100)level=100;
+    return level==a->game_mix_volume || game_mix_set(a,level);
+}
+static bool radio_mix_set(App*a,int level){
+    if(level<0||level>100)return false;
+    radio_mix_load(a);
+    if(level==a->radio_mix_volume)return true;
+    /* The original radio control runs the same Node controller as before. */
+    const char*base=getenv("MUSTARDTUBE_APP_DIR");
+    if(!base || !*base || strlen(base)>PATH_MAX-65)return false;
+    char node[PATH_MAX],script[PATH_MAX],value[12];
+    snprintf(node,sizeof(node),"%s/bin/node",base);
+    snprintf(script,sizeof(script),"%s/scripts/background-radio.js",base);
+    snprintf(value,sizeof(value),"%d",level);
+    if(access(node,X_OK)!=0 || access(script,R_OK)!=0)return false;
+    pid_t pid=fork();if(pid<0)return false;
+    if(pid==0){execl(node,node,script,"set-volume",value,(char*)NULL);_exit(127);}
+    int status=0;pid_t rc;
+    do{rc=waitpid(pid,&status,0);}while(rc<0&&errno==EINTR);
+    if(rc<0||!WIFEXITED(status))return false;
+    if(WEXITSTATUS(status)!=0&&WEXITSTATUS(status)!=4)return false;
+    a->radio_mix_volume=level;a->dirty=true;return true;
+}
+static bool radio_mix_adjust(App*a,int direction){
+    radio_mix_load(a);
+    int level=a->radio_mix_volume+direction*5;
+    if(level<0)level=0;
+    if(level>100)level=100;
+    return radio_mix_set(a,level);
+}
+
 /* Signed URLs never enter SDL. The worker writes an ID/time readiness marker. */
 static bool stream_is_prepared(App*a) {
     if(!a->current_is_youtube || !valid_youtube_id(a->current_video.id))return false;
@@ -603,7 +733,112 @@ static void radio_poll(App*a){
 }
 static void radio_open(App*a){
     a->radio_mode=0;radio_load_countries(a);radio_load_favourites(a);
+    /* These markers contain only a station name/notice, never its stream URL.
+       The supervisor validates the persisted player's PID on every entry. */
+    char path[PATH_MAX];
+    a->radio_background_name[0]=0;
+    if(snprintf(path,sizeof(path),"%s/radio-background-name.txt",a->data_dir)<(int)sizeof(path)){
+        FILE*f=fopen(path,"r");if(f){char line[160]={0};
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_background_name,sizeof(a->radio_background_name),line);
+            fclose(f);
+        }
+    }
+    if(snprintf(path,sizeof(path),"%s/radio-background-notice.txt",a->data_dir)<(int)sizeof(path)){
+        FILE*f=fopen(path,"r");if(f){char line[160]={0};
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_status,sizeof(a->radio_status),line);
+            fclose(f);unlink(path);
+        }
+    }
     if(!a->country_count)radio_refresh(a,true,0);
+}
+/* Only public directory metadata is persisted for the Now Playing screen.
+ * In particular, the transient stream URL is consumed and removed by the
+ * short-lived Node controller; this metadata never contains a URL. */
+static bool radio_remember_display(App*a,const RadioStation*st){
+    char meta[350];
+    if(snprintf(meta,sizeof(meta),"%s\n%s\n%s\n%s\n",
+        st->id,st->country,st->codec,st->name)>=(int)sizeof(meta))return false;
+    return write_data_file(a,"radio-now-meta.txt",meta);
+}
+/* A read-only liveness check costs no resident service or radio restart.
+ * A stale name marker alone is insufficient evidence that radio is active. */
+static bool radio_now_process_alive(App*a){
+    char path[PATH_MAX],buf[1024]={0},proc[80],exe[PATH_MAX];
+    if(snprintf(path,sizeof(path),"%s/radio-background-state.json",a->data_dir)>=(int)sizeof(path))return false;
+    FILE*f=fopen(path,"r");if(!f)return false;
+    size_t n=fread(buf,1,sizeof(buf)-1,f);fclose(f);buf[n]=0;
+    const char*where=strstr(buf,"\"pid\":");if(!where)return false;
+    char*end=NULL;long pid=strtol(where+6,&end,10);
+    if(end==where+6 || pid<=1 || pid>INT_MAX)return false;
+    if(snprintf(proc,sizeof(proc),"/proc/%ld/exe",pid)>=(int)sizeof(proc))return false;
+    ssize_t len=readlink(proc,exe,sizeof(exe)-1);
+    if(len<=0)return false;
+    exe[len]=0;
+    const char*base=getenv("MUSTARDTUBE_APP_DIR");
+    if(!base||!*base)return false;
+    char expected[PATH_MAX];
+    if(snprintf(expected,sizeof(expected),"%s/bin/ffplay-radio",base)>=(int)sizeof(expected))return false;
+    char resolved[PATH_MAX];
+    if(!realpath(expected,resolved))return false;
+    return strcmp(exe,resolved)==0;
+}
+static void radio_now_load(App*a){
+    a->radio_now_active=false;
+    a->radio_now_blink=true;
+    a->radio_now_logo_checked=false;
+    a->radio_now_last_tick=SDL_GetTicks();
+    a->radio_background_name[0]=0;
+    a->radio_now_notice[0]=0;
+    memset(&a->radio_now_station,0,sizeof(a->radio_now_station));
+    char path[PATH_MAX],line[200];
+    if(snprintf(path,sizeof(path),"%s/radio-now-meta.txt",a->data_dir)<(int)sizeof(path)){
+        FILE*f=fopen(path,"r");
+        if(f){
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_now_station.id,sizeof(a->radio_now_station.id),line);
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_now_station.country,sizeof(a->radio_now_station.country),line);
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_now_station.codec,sizeof(a->radio_now_station.codec),line);
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_now_station.name,sizeof(a->radio_now_station.name),line);
+            fclose(f);
+        }
+    }
+    if(snprintf(path,sizeof(path),"%s/radio-background-name.txt",a->data_dir)<(int)sizeof(path)){
+        FILE*f=fopen(path,"r");
+        if(f){
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_background_name,sizeof(a->radio_background_name),line);
+            fclose(f);
+        }
+    }
+    a->radio_now_active=(a->radio_background_name[0]!=0 && radio_now_process_alive(a));
+    if(a->radio_now_active && !a->radio_now_station.name[0])
+        snprintf(a->radio_now_station.name,sizeof(a->radio_now_station.name),"%s",a->radio_background_name);
+    if(snprintf(path,sizeof(path),"%s/radio-background-notice.txt",a->data_dir)<(int)sizeof(path)){
+        FILE*f=fopen(path,"r");
+        if(f){
+            if(fgets(line,sizeof(line),f))safe_line(a->radio_now_notice,sizeof(a->radio_now_notice),line);
+            fclose(f);unlink(path);
+        }
+    }
+    radio_mix_load(a);
+    a->dirty=true;
+}
+/* The station directory and favourites cache already contain validated URLs.
+ * Never create a second persistent file containing a stream URL for fallback. */
+static bool radio_now_find_cached(App*a,RadioStation*out){
+    if(!a->radio_now_station.id[0])return false;
+    radio_load_favourites(a);
+    for(int i=0;i<a->favourite_count;i++)
+        if(!strcmp(a->favourites[i].id,a->radio_now_station.id)){
+            *out=a->favourites[i];return radio_url_ok(out->url);
+        }
+    if(strlen(a->radio_now_station.country)==2){
+        snprintf(a->radio_selected_country,sizeof(a->radio_selected_country),"%s",a->radio_now_station.country);
+        radio_load_stations(a);
+        for(int i=0;i<a->station_count;i++)
+            if(!strcmp(a->stations[i].id,a->radio_now_station.id)){
+                *out=a->stations[i];return radio_url_ok(out->url);
+            }
+    }
+    return false;
 }
 static bool radio_pick_station(App*a,const RadioStation*st){
     if(!st || !radio_url_ok(st->url))return false;
@@ -611,7 +846,54 @@ static bool radio_pick_station(App*a,const RadioStation*st){
     if(snprintf(selected,sizeof(selected),"%s\n%s\n",st->name,st->url)>=(int)sizeof(selected))return false;
     if(!write_data_file(a,"radio-selected.txt",selected))return false;
     write_data_file(a,"radio-last-country.txt",st->country);
-    a->radio_handoff=true;a->running=false;return true;
+    a->radio_handoff=true;a->radio_handoff_kind=RADIO_PLAY_EXIT;a->running=false;return true;
+}
+static bool radio_start_native_station(App*a,const RadioStation*st){
+    if(!st || !radio_url_ok(st->url))return false;
+    char selected[1100];
+    if(snprintf(selected,sizeof(selected),"%s\n%s\n",st->name,st->url)>=(int)sizeof(selected))return false;
+    if(!radio_remember_display(a,st) || !write_data_file(a,"radio-selected.txt",selected))return false;
+    write_data_file(a,"radio-last-country.txt",st->country);
+    a->radio_handoff=true;a->radio_handoff_kind=RADIO_NATIVE_START_EXIT;
+    a->running=false;return true;
+}
+static bool radio_start_background(App*a){
+    if(a->page!=RADIO)return false;
+    if(a->radio_mode==0 && a->radio_background_name[0]){
+        set_page(a,RADIO_NOW);return true;
+    }
+    if(a->radio_mode==0)return false;
+    const RadioStation*st=NULL;
+    if(a->radio_mode==1 && a->station_count>0)st=&a->stations[a->station_idx];
+    else if(a->radio_mode==2 && a->favourite_count>0)st=&a->favourites[a->favourite_idx];
+    if(!st || !radio_url_ok(st->url))return false;
+    char selected[1100];
+    if(snprintf(selected,sizeof(selected),"%s\n%s\n",st->name,st->url)>=(int)sizeof(selected) ||
+       !radio_remember_display(a,st) || !write_data_file(a,"radio-selected.txt",selected))return false;
+    write_data_file(a,"radio-last-country.txt",st->country);
+    a->radio_handoff=true;a->radio_handoff_kind=RADIO_BACKGROUND_START_EXIT;
+    a->running=false;return true;
+}
+static void radio_stop_background(App*a){
+    if(a->page!=RADIO && a->page!=RADIO_NOW)return;
+    a->radio_handoff=true;a->radio_handoff_kind=a->page==RADIO_NOW?RADIO_NATIVE_STOP_EXIT:RADIO_BACKGROUND_STOP_EXIT;
+    a->running=false;
+}
+static void radio_now_reconnect(App*a,bool wasabi){
+    RadioStation st={0};
+    if(!radio_now_find_cached(a,&st)){
+        snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Station not in local directory. Re-select from Radio.");
+        a->dirty=true;return;
+    }
+    if(wasabi){
+        if(!radio_pick_station(a,&st)){
+            snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Unable to launch Wasabi fallback.");
+            a->dirty=true;
+        }
+    }else if(!radio_start_native_station(a,&st)){
+        snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Unable to reconnect. Select the station again.");
+        a->dirty=true;
+    }
 }
 static void stop_prefetch(App*a) {
     if(a->worker_pid>0){
@@ -992,7 +1274,7 @@ static void draw_header(App *a) {
     print_text(a,FS_11,"Built for muOS",66,41,t->muted);
     /* Six native tabs reuse the original SDL controller handling. */
     for(int i=0;i<NAV_TAB_COUNT;i++){
-        int x=279+i*57;bool selected=(int)a->page==i;
+        int x=279+i*57;bool selected=((int)a->page==i || (a->page==RADIO_NOW && i==RADIO));
         if(selected)outline(a,x,18,55,36,11,t->outline,t->selected);
         text_center(a,FS_11,page_names[i],x,29,55,selected?t->accent:t->muted);
     }
@@ -1110,8 +1392,11 @@ static void draw_results(App*a) {
 static void draw_radio(App*a){
     Theme*t=&a->theme;
     print_text(a,FS_23,"Internet Radio",20,82,t->text);
-    print_text(a,FS_11,"Browse countries and stations | Played by Wasabi",20,112,t->muted);
-    if(a->radio_loading)print_text(a,FS_11,"Loading radio directory...",20,134,t->secondary);
+    print_text(a,FS_11,"A Now Playing   START BG   SELECT Stop   Settings: Radio Mix",20,112,t->muted);
+    if(a->radio_background_name[0]){
+        char now[175];snprintf(now,sizeof(now),"BG RADIO: %s",a->radio_background_name);
+        print_ellipsis(a,FS_13,now,20,133,595,t->accent);
+    }else if(a->radio_loading)print_text(a,FS_11,"Loading radio directory...",20,134,t->secondary);
     else if(a->radio_status[0])print_ellipsis(a,FS_11,a->radio_status,20,134,590,t->secondary);
     bool countries=a->radio_mode==0, fav=a->radio_mode==2;
     int n=countries?a->country_count:fav?a->favourite_count:a->station_count;
@@ -1152,9 +1437,52 @@ static void draw_radio(App*a){
         }
     }
     if(!n)print_ellipsis(a,FS_13,countries?"No countries. Press X to retry.":fav?"No saved stations yet.":a->radio_loading?"Loading stations...":"No stations. Press X to retry.",28,235,565,t->text);
-    print_text(a,FS_11,countries?"A Open    X Refresh    Y Favourites    </> Page":
-        fav?"A Play    Y Unfavourite    B Countries    </> Page":
-        "A Play    X More    Y Favourite    </> Page",20,415,t->muted);
+    print_text(a,FS_11,countries?"A Open    X Refresh    Y Favourites    START Now Playing":
+        fav?"A Listen    START BG    SELECT Stop    Y Unfavourite":
+        "A Listen    START BG    SELECT Stop    X More    Y Fav",20,415,t->muted);
+}
+/* One FFplay decoder powers foreground and background radio.  Only the tiny
+ * status dot changes once per second.  No FFT, spinning texture, network
+ * polling, or SDL renderer remains running after leaving for a game. */
+static void draw_radio_now(App*a){
+    Theme*t=&a->theme;
+    print_text(a,FS_23,"Radio / Now Playing",20,82,t->text);
+    print_text(a,FS_11,"Built-in audio-only player - no Wasabi screen",20,112,t->muted);
+    outline(a,20,135,600,267,16,t->outline,t->surface);
+    rounded(a,39,154,125,125,17,t->alt);
+    if(!a->radio_now_logo_checked){
+        (void)radio_station_logo(a,0,&a->radio_now_station);
+        a->radio_now_logo_checked=true;
+    }
+    SDL_Texture*logo=a->radio_logos[0];
+    if(logo){SDL_Rect dst={45,160,113,113};SDL_RenderCopy(a->r,logo,NULL,&dst);}
+    else {circle(a,101,208,40,t->accent);text_center(a,FS_23,"FM",61,194,80,t->bg);}
+    rounded(a,182,157,171,25,7,a->radio_now_active?t->selected:t->alt);
+    circle(a,195,170,5,a->radio_now_active?
+        (a->radio_now_blink?t->accent:t->outline):t->muted);
+    print_text(a,FS_13,a->radio_now_active?"RADIO ACTIVE":"RADIO STOPPED",207,162,
+               a->radio_now_active?t->accent:t->muted);
+    print_ellipsis(a,FS_23,a->radio_now_station.name[0]?a->radio_now_station.name:"Internet Radio",182,199,412,t->text);
+    char sub[95];snprintf(sub,sizeof(sub),"%s  %s",a->radio_now_station.codec[0]?a->radio_now_station.codec:"Audio stream",
+       a->radio_now_station.country);
+    print_text(a,FS_13,sub,184,238,t->muted);
+    print_ellipsis(a,FS_11,a->radio_now_active?"Player running (stream may be buffering)":"Choose A to retry or B for stations",182,262,415,t->secondary);
+    char vol[80];
+    snprintf(vol,sizeof(vol),"%s Radio Volume  %d%%",a->radio_now_slider==0?">":" ",a->radio_mix_volume);
+    print_text(a,FS_13,vol,39,287,a->radio_now_slider==0?t->accent:t->text);
+    rounded(a,39,317,562,10,5,t->outline);
+    if(a->radio_mix_volume)rounded(a,39,317,562*a->radio_mix_volume/100,10,5,t->accent);
+    snprintf(vol,sizeof(vol),"%s Game Volume  %d%%",a->radio_now_slider==1?">":" ",a->game_mix_volume);
+    print_text(a,FS_13,vol,39,336,a->radio_now_slider==1?t->accent:t->text);
+    rounded(a,39,365,562,10,5,t->outline);
+    if(a->game_mix_volume)rounded(a,39,365,562*a->game_mix_volume/100,10,5,t->accent);
+    print_text(a,FS_11,"UP/DOWN choose mix  LEFT/RIGHT -/+5%  Stop: Game 100%",39,384,t->muted);
+    print_text(a,FS_11,a->radio_hotkeys_mode==2?
+         "X: In-game RADIO+GAME":a->radio_hotkeys_mode==1?
+         "X: In-game RADIO (press to enable GAME)":
+         "X: In-game OFF (cycle to RADIO+GAME)",39,405,t->secondary);
+    print_ellipsis(a,FS_11,a->radio_now_notice[0]?a->radio_now_notice:
+         "START: Games    SELECT: Stop    Y: Wasabi    B: List",20,419,599,t->secondary);
 }
 static void draw_style(App*a) {
     Theme*t=&a->theme;
@@ -1174,11 +1502,20 @@ static void draw_style(App*a) {
         print_text(a,FS_15,i==0?"Midnight":i==1?"Forest":"Paper",x+13,y+107,t->text);
         if(i==a->theme_id)print_text(a,FS_11,"ACTIVE",x+115,y+112,t->secondary);
     }
-    print_text(a,FS_13,"STORAGE & CACHE",20,321,t->secondary);
-    rounded(a,20,346,600,76,13,t->surface);
-    print_text(a,FS_13,"A Theme     X Clear cache     Y Clear viewing history",36,351,t->text);
-    print_text(a,FS_11,"Clear Cache keeps settings, favourites and viewing history",36,379,t->muted);
-    print_text(a,FS_11,"CPU governor: use muOS Application Options (Performance)",36,399,t->muted);
+    print_text(a,FS_13,"INDEPENDENT RADIO VOLUME",20,321,t->secondary);
+    rounded(a,20,346,600,76,13,a->radio_mix_edit?t->selected:t->surface);
+    char mix[140];
+    snprintf(mix,sizeof(mix),"Radio: %d%%   SELECT: %s   LEFT/RIGHT: %s",
+             a->radio_mix_volume,a->radio_mix_edit?"Done":"Adjust",a->radio_mix_edit?"- / + 5%":"Themes");
+    print_text(a,FS_13,mix,34,352,a->radio_mix_edit?t->accent:t->text);
+    int barw=150;rounded(a,459,376,barw,7,3,t->outline);
+    if(a->radio_mix_volume>0)rounded(a,459,376,barw*a->radio_mix_volume/100,7,3,t->accent);
+    print_text(a,FS_11,"Game audio unaffected. Hardware volume controls master sound.",34,374,t->muted);
+    print_text(a,FS_11,a->radio_hotkeys_mode==2?
+      "RADIO+GAME: L2+R2 LEFT/RIGHT radio, UP/DOWN game":
+      a->radio_hotkeys_mode==1?
+      "RADIO ONLY: L2+R2 LEFT/RIGHT   START: Radio+Game":
+      "IN-GAME OFF   START: Radio only > Radio+Game > Off",34,397,t->secondary);
 }
 /* Self-contained manual: no WebView, markdown runtime or network dependency.
  * Each line is bounded for the 640x480 display; one logical line per row. */
@@ -1186,12 +1523,21 @@ typedef struct {const char *text; bool heading;} AboutLine;
 static const AboutLine ABOUT_LINES[]={
     {"WELCOME",true},
     {"MustardTube - lightweight video and Internet Radio",false},
-    {"Version 0.9.11 Beta 2.1 | PapaZolaRis",false},
+    {"Version 0.9.11 Beta 2.2.6a EXP | PapaZolaRis",false},
     {"Independent community project for muOS.",false},
     {"",false},
     {"REQUIREMENTS",true},
     {"muOS 2606.0 Andromeda; multiple display formats.",false},
     {"Wi-Fi for online video and radio; stock Wasabi player.",false},
+    {"Radio: A opens built-in Now Playing, START background.",false},
+    {"Now Playing: UP/DOWN slider, LEFT/RIGHT adjusts, SELECT stops.",false},
+    {"Now Playing: START exits to games, Y opens Wasabi.",false},
+    {"Background mode requires a bundled ARM64 audio player.",false},
+    {"Settings START: cycle radio/game hotkeys, or OFF.",false},
+    {"While playing: hold L2+R2, tap LEFT/RIGHT for radio mix.",false},
+    {"Game slider sets radio-session mix; L2+R2 Up/Down in game.",false},
+    {"To stop radio: return to app and use Radio SELECT.",false},
+    {"Simultaneous game audio needs on-device validation.",false},
     {"No PortMaster, Google login or API key required.",false},
     {"Other devices need community hardware validation.",false},
     {"",false},
@@ -1238,7 +1584,8 @@ static const AboutLine ABOUT_LINES[]={
     {"Y saves/removes a favourite; Y on countries opens",false},
     {"the Favourites list; B returns to countries.",false},
     {"Station icons are optional; some stations go offline.",false},
-    {"Streams are handed to Wasabi; no login required.",false},
+    {"Radio A uses built-in player; Y in Now Playing",false},
+    {"offers Wasabi fallback if station is cached.",false},
     {"",false},
     {"RECENT AND SETTINGS",true},
     {"Recent: reopen the last search and results.",false},
@@ -1396,36 +1743,56 @@ static void draw_footer(App*a) {
     const char *hint=a->page==HOME?"LEFT/RIGHT Category  UP/DOWN Videos  A Details  X Refresh  LB/RB Tabs":
      a->page==SEARCH?"D-PAD Keyboard    A Type    START Search    L/R Tabs":
      a->page==SAVED?"UP/DOWN  Select     A  Open     LB/RB  Tabs":
-     a->page==RADIO?"Hold UP/DOWN Scroll   LEFT/RIGHT Page   A Select   X More   Y Fav":
-     a->page==STYLE?"A Theme  X Clear cache  Y Clear history  LB/RB Tabs":
+     a->page==RADIO?"A Built-in Radio  START BG   SELECT Stop    B Back":
+     a->page==RADIO_NOW?"UP/DOWN Select Mix  LEFT/RIGHT Adjust  START Games  SELECT Stop":
+     a->page==STYLE?(a->radio_mix_edit?"LEFT/RIGHT Radio +/-5%  SELECT Done  START In-Game":"A Theme  SELECT Radio  START In-Game  X Cache  Y History"):
      a->page==ABOUT?"Hold UP/DOWN Scroll   LEFT/RIGHT Page   X/Y Sections   B Home":
      a->page==RESULTS?(a->more_available?"UP/DOWN Browse    A Details    X More    B Search":"UP/DOWN Browse    A Details    B Search"):
      "A Play    B Back    Y Quality    MENU + START Return";
     print_text(a,FS_11,hint,20,451,t->muted);
-    print_text(a,FS_11,"v0.9.11b2.1",556,452,t->secondary);
+    print_text(a,FS_11,"v0.9.11b2.2.6a",530,452,t->secondary);
 }
 static void render(App*a) {
     draw_background(a);draw_header(a);
     switch(a->page){case HOME:draw_home(a);break;case SEARCH:draw_search(a);break;
-    case SAVED:draw_saved(a);break;case RADIO:draw_radio(a);break;case STYLE:draw_style(a);break;case ABOUT:draw_about(a);break;
+    case SAVED:draw_saved(a);break;case RADIO:draw_radio(a);break;case RADIO_NOW:draw_radio_now(a);break;
+    case STYLE:draw_style(a);break;case ABOUT:draw_about(a);break;
     case PLAYER:draw_player(a);break;case RESULTS:draw_results(a);break;}
     draw_footer(a);
 }
 static void set_page(App*a,Page p) {
     a->nav_repeat_dir=0; /* A held D-pad never changes the next tab. */
+    if(a->page==RADIO_NOW && p!=RADIO_NOW)drop_radio_logos(a); /* Release player artwork when hidden. */
     if(a->page==HOME && p!=HOME)stop_home_worker(a);
     if(a->page==RESULTS && p!=RESULTS)stop_result_thumb_worker(a);
     if(a->page==RADIO && p!=RADIO){stop_radio_worker(a);stop_radio_logo_worker(a);drop_radio_logos(a);}
+    if(a->page==STYLE && p!=STYLE)a->radio_mix_edit=false;
     if(p!=PLAYER && p!=RESULTS){stop_prefetch(a);a->awaiting_stream=false;}
     a->page=p;a->dirty=true;
     if(p==HOME){load_home_file(a);if(a->home_worker_pid==0)start_home_refresh(a,false);}
     if(p==RESULTS)start_result_thumb_worker(a,true);
     if(p==RADIO)radio_open(a);
+    if(p==RADIO_NOW)radio_now_load(a);
+    if(p==STYLE)radio_mix_load(a);
+}
+/* Entering the Radio tab resumes the active native player.  B from Now
+ * Playing deliberately calls set_page(RADIO), retaining access to the
+ * directory while audio continues. This is UI-only: no player restart. */
+static void open_nav_tab(App*a,Page tab){
+    if(tab==RADIO && radio_now_process_alive(a))set_page(a,RADIO_NOW);
+    else set_page(a,tab);
 }
 static void cycle_page(App*a,int step) {
     a->status_message[0]=0;
+    /* Treat Now Playing as the Radio tab; do not briefly enter the country
+     * directory (which could initiate an unnecessary directory worker). */
+    if(a->page==RADIO_NOW){
+        int p=(RADIO+step+NAV_TAB_COUNT)%NAV_TAB_COUNT;
+        open_nav_tab(a,(Page)p);return;
+    }
     if(a->page==PLAYER || a->page==RESULTS)set_page(a,a->from_page);
-    int p=((int)a->page+step+NAV_TAB_COUNT)%NAV_TAB_COUNT;set_page(a,(Page)p);
+    int p=((int)a->page+step+NAV_TAB_COUNT)%NAV_TAB_COUNT;
+    open_nav_tab(a,(Page)p);
 }
 static void submit_search(App*a); /* Defined below; reused by recent-search action. */
 static void open_last_results(App*a) {
@@ -1525,12 +1892,13 @@ static void activate(App*a) {
             snprintf(a->radio_selected_country,sizeof(a->radio_selected_country),"%s",a->countries[a->country_idx].code);
             a->radio_mode=1;a->station_count=0;a->station_idx=0;stop_radio_logo_worker(a);drop_radio_logos(a);radio_refresh(a,false,0);
         }else if(a->radio_mode==1 && a->station_count>0){
-            if(!radio_pick_station(a,&a->stations[a->station_idx]))snprintf(a->radio_status,sizeof(a->radio_status),"Station address unavailable.");
+            if(!radio_start_native_station(a,&a->stations[a->station_idx]))snprintf(a->radio_status,sizeof(a->radio_status),"Station address unavailable.");
         }else if(a->radio_mode==2 && a->favourite_count>0){
-            if(!radio_pick_station(a,&a->favourites[a->favourite_idx]))snprintf(a->radio_status,sizeof(a->radio_status),"Station address unavailable.");
+            if(!radio_start_native_station(a,&a->favourites[a->favourite_idx]))snprintf(a->radio_status,sizeof(a->radio_status),"Station address unavailable.");
         }
     }
-    else if(a->page==STYLE){if(read_theme(a,a->style_idx))save_settings(a);}
+    else if(a->page==RADIO_NOW)radio_now_reconnect(a,false);
+    else if(a->page==STYLE && !a->radio_mix_edit){if(read_theme(a,a->style_idx))save_settings(a);}
     else if(a->page==SEARCH)keyboard_activate(a);
     else if(a->page==RESULTS){
         if(a->result_count>0){
@@ -1568,12 +1936,14 @@ static void activate(App*a) {
     }
 }
 static void back(App*a) {
-    if(a->page==PLAYER){
+    if(a->page==STYLE && a->radio_mix_edit){a->radio_mix_edit=false;a->dirty=true;}
+    else if(a->page==PLAYER){
         stop_prefetch(a);a->awaiting_stream=false;
         if(a->current_is_youtube){write_data_file(a,"selected.txt","");drop_thumbnail(a);}
         set_page(a,a->from_page);
     }
     else if(a->page==RESULTS)set_page(a,SEARCH);
+    else if(a->page==RADIO_NOW)set_page(a,RADIO);
     else if(a->page==RADIO && a->radio_mode!=0){stop_radio_worker(a);stop_radio_logo_worker(a);drop_radio_logos(a);a->radio_mode=0;a->dirty=true;}
     else if(a->page!=HOME)set_page(a,HOME);
     else a->running=false;
@@ -1594,10 +1964,24 @@ static void radio_y(App*a){
 }
 static void keydown(App*a,SDL_Keycode key) {
     switch(key){
-      case SDLK_UP:navigate(a,0,-1);break;
-      case SDLK_DOWN:navigate(a,0,1);break;
-      case SDLK_LEFT:navigate(a,-1,0);break;
-      case SDLK_RIGHT:navigate(a,1,0);break;
+      case SDLK_UP:if(a->page==RADIO_NOW){a->radio_now_slider=0;a->dirty=true;}else navigate(a,0,-1);break;
+      case SDLK_DOWN:if(a->page==RADIO_NOW){a->radio_now_slider=1;a->dirty=true;}else navigate(a,0,1);break;
+      case SDLK_LEFT:if(a->page==RADIO_NOW){
+          bool ok=a->radio_now_slider?game_mix_adjust(a,-1):radio_mix_adjust(a,-1);
+          if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
+          a->dirty=true;
+        }else if(a->page==STYLE && a->radio_mix_edit){
+          if(!radio_mix_adjust(a,-1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
+          a->dirty=true;
+        }else navigate(a,-1,0);break;
+      case SDLK_RIGHT:if(a->page==RADIO_NOW){
+          bool ok=a->radio_now_slider?game_mix_adjust(a,1):radio_mix_adjust(a,1);
+          if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
+          a->dirty=true;
+        }else if(a->page==STYLE && a->radio_mix_edit){
+          if(!radio_mix_adjust(a,1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
+          a->dirty=true;
+        }else navigate(a,1,0);break;
       case SDLK_ESCAPE:back(a);break;
       case SDLK_RETURN:case SDLK_KP_ENTER:if(a->page==SEARCH)submit_search(a);else activate(a);break;
       case SDLK_BACKSPACE:if(a->page==SEARCH)remove_char(a);else back(a);break;
@@ -1605,17 +1989,30 @@ static void keydown(App*a,SDL_Keycode key) {
       case SDLK_PAGEUP:case SDLK_LEFTBRACKET:cycle_page(a,-1);break;
       case SDLK_PAGEDOWN:case SDLK_RIGHTBRACKET:cycle_page(a,1);break;
       case SDLK_x:if(a->page==ABOUT)about_jump_section(a,1);
-        else if(a->page==RADIO)radio_x(a);
+        else if(a->page==RADIO_NOW){
+            if(!radio_hotkeys_toggle(a))snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Unable to change hotkey mode.");
+            a->dirty=true;
+        }else if(a->page==RADIO)radio_x(a);
         else if(a->page==HOME)start_home_refresh(a,true);
         else if(a->page==RESULTS)request_more_results(a);
         else if(a->page==STYLE)request_clear_cache(a);
         break;
-      case SDLK_y:if(a->page==ABOUT)about_jump_section(a,-1);else if(a->page==STYLE)request_clear_history(a);else if(a->page==RADIO)radio_y(a);else if(a->page==HOME)home_set_category(a,(a->home_category+1)%HOME_CATEGORIES);else toggle_quality(a);break;
+      case SDLK_v:if(a->page==STYLE){a->radio_mix_edit=!a->radio_mix_edit;a->dirty=true;}break;
+      case SDLK_h:if(a->page==STYLE && !radio_hotkeys_toggle(a)){
+          snprintf(a->status_message,sizeof(a->status_message),"Unable to save in-game hotkeys setting.");a->dirty=true;
+        }break;
+      case SDLK_s:if(a->page==RADIO_NOW){a->running=false;break;}
+        if(a->page==RADIO && !radio_start_background(a)){
+          snprintf(a->radio_status,sizeof(a->radio_status),"Choose a station before starting background radio.");a->dirty=true;
+        }break;
+      case SDLK_k:if(a->page==RADIO || a->page==RADIO_NOW)radio_stop_background(a);break;
+      case SDLK_y:if(a->page==RADIO_NOW)radio_now_reconnect(a,true);
+        else if(a->page==ABOUT)about_jump_section(a,-1);else if(a->page==STYLE)request_clear_history(a);else if(a->page==RADIO)radio_y(a);else if(a->page==HOME)home_set_category(a,(a->home_category+1)%HOME_CATEGORIES);else toggle_quality(a);break;
       case SDLK_F5:read_theme(a,a->theme_id);break;
       case SDLK_F1:set_page(a,HOME);break;
       case SDLK_F2:set_page(a,SEARCH);break;
       case SDLK_F3:set_page(a,SAVED);break;
-      case SDLK_F4:set_page(a,RADIO);break;
+      case SDLK_F4:open_nav_tab(a,RADIO);break;
       case SDLK_F7:set_page(a,STYLE);break;
       case SDLK_F6:set_page(a,ABOUT);break;
       default:break;
@@ -1634,27 +2031,63 @@ static void on_button(App*a,Uint8 button) {
         a->nav_repeat_at=SDL_GetTicks()+320;
     }
     switch(button){
-      case SDL_CONTROLLER_BUTTON_DPAD_UP:navigate(a,0,-1);break;
-      case SDL_CONTROLLER_BUTTON_DPAD_DOWN:navigate(a,0,1);break;
-      case SDL_CONTROLLER_BUTTON_DPAD_LEFT:navigate(a,-1,0);break;
-      case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:navigate(a,1,0);break;
+      case SDL_CONTROLLER_BUTTON_DPAD_UP:if(a->page==RADIO_NOW){a->radio_now_slider=0;a->dirty=true;}else navigate(a,0,-1);break;
+      case SDL_CONTROLLER_BUTTON_DPAD_DOWN:if(a->page==RADIO_NOW){a->radio_now_slider=1;a->dirty=true;}else navigate(a,0,1);break;
+      case SDL_CONTROLLER_BUTTON_DPAD_LEFT:if(a->page==RADIO_NOW){
+          bool ok=a->radio_now_slider?game_mix_adjust(a,-1):radio_mix_adjust(a,-1);
+          if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
+          a->dirty=true;
+        }else if(a->page==STYLE && a->radio_mix_edit){
+          if(!radio_mix_adjust(a,-1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
+          a->dirty=true;
+        }else navigate(a,-1,0);break;
+      case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:if(a->page==RADIO_NOW){
+          bool ok=a->radio_now_slider?game_mix_adjust(a,1):radio_mix_adjust(a,1);
+          if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
+          a->dirty=true;
+        }else if(a->page==STYLE && a->radio_mix_edit){
+          if(!radio_mix_adjust(a,1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
+          a->dirty=true;
+        }else navigate(a,1,0);break;
       case SDL_CONTROLLER_BUTTON_A:activate(a);break;
       case SDL_CONTROLLER_BUTTON_B:back(a);break;
       case SDL_CONTROLLER_BUTTON_X:if(a->page==ABOUT)about_jump_section(a,1);
-        else if(a->page==RADIO)radio_x(a);
+        else if(a->page==RADIO_NOW){
+            if(!radio_hotkeys_toggle(a))snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Unable to change hotkey mode.");
+            a->dirty=true;
+        }else if(a->page==RADIO)radio_x(a);
         else if(a->page==HOME)start_home_refresh(a,true);
         else if(a->page==RESULTS)request_more_results(a);
         else if(a->page==STYLE)request_clear_cache(a);
         break;
       case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:cycle_page(a,-1);break;
       case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:cycle_page(a,1);break;
-      case SDL_CONTROLLER_BUTTON_START:if(a->page==SEARCH)submit_search(a);else set_page(a,HOME);break;
-      case SDL_CONTROLLER_BUTTON_Y:if(a->page==ABOUT)about_jump_section(a,-1);else if(a->page==STYLE)request_clear_history(a);else if(a->page==RADIO)radio_y(a);else if(a->page==HOME)home_set_category(a,(a->home_category+1)%HOME_CATEGORIES);else if(a->page==PLAYER)toggle_quality(a);else set_page(a,STYLE);break;
+      case SDL_CONTROLLER_BUTTON_START:if(a->page==RADIO_NOW){a->running=false;}
+        else if(a->page==RADIO){
+            if(!radio_start_background(a)){snprintf(a->radio_status,sizeof(a->radio_status),"Choose a station before starting background radio.");a->dirty=true;}
+        }else if(a->page==STYLE){
+            if(!radio_hotkeys_toggle(a))snprintf(a->status_message,sizeof(a->status_message),"Unable to save in-game hotkeys setting.");
+            a->dirty=true;
+        }else if(a->page==SEARCH)submit_search(a);else set_page(a,HOME);break;
+      case SDL_CONTROLLER_BUTTON_BACK:if(a->page==RADIO || a->page==RADIO_NOW)radio_stop_background(a);
+        else if(a->page==STYLE){a->radio_mix_edit=!a->radio_mix_edit;a->dirty=true;}break;
+      case SDL_CONTROLLER_BUTTON_Y:if(a->page==RADIO_NOW)radio_now_reconnect(a,true);
+        else if(a->page==ABOUT)about_jump_section(a,-1);else if(a->page==STYLE)request_clear_history(a);else if(a->page==RADIO)radio_y(a);else if(a->page==HOME)home_set_category(a,(a->home_category+1)%HOME_CATEGORIES);else if(a->page==PLAYER)toggle_quality(a);else set_page(a,STYLE);break;
       default:break;
     }
 }
 static void mouse_down(App*a,int x,int y){
-    if(y>=18&&y<=55&&x>=279&&x<622){int tab=(x-279)/57;if(tab<NAV_TAB_COUNT)set_page(a,(Page)tab);return;}
+    if(a->page==RADIO_NOW && x>=39 && x<=601 &&
+       ((y>=310 && y<=332)||(y>=358 && y<=380))){
+        bool game=(y>=358);a->radio_now_slider=game?1:0;
+        int level=((x-39)*100+281)/562;
+        level=((level+2)/5)*5;
+        if(level>100)level=100;
+        bool ok=game?game_mix_set(a,level):radio_mix_set(a,level);
+        if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
+        a->dirty=true;return;
+    }
+    if(y>=18&&y<=55&&x>=279&&x<622){int tab=(x-279)/57;if(tab<NAV_TAB_COUNT)open_nav_tab(a,(Page)tab);return;}
     if(a->page==HOME&&y>=128&&y<155&&x>=20&&x<622){
         int cat=(x-20)/101;if(cat<HOME_CATEGORIES)home_set_category(a,cat);
     }else if(a->page==HOME&&y>=163&&y<419){
@@ -1746,10 +2179,10 @@ static bool screenshot(App*a,const char*filename) {
 int main(int argc,char**argv) {
     const char*requested_assets=NULL,*screenfile=NULL;
     int force_theme=-1;
-    bool handoff=false, resume_player=false, show_results=false, show_style=false, show_about=false, show_radio=false;
+    bool handoff=false, resume_player=false, show_results=false, show_style=false, show_about=false, show_radio=false, show_radio_now=false;
     int handoff_kind=0;
     for(int i=1;i<argc;i++) {
-        if(!strcmp(argv[i],"--version")){puts("MustardTube 0.9.11 Beta 2.1 display compatibility preview (Home categories, Search thumbnails, Internet Radio)");return 0;}
+        if(!strcmp(argv[i],"--version")){puts("MustardTube 0.9.11 Beta 2.2.6a DualMixer StaleSession UI Fix (Andromeda ARM64)");return 0;}
         if(!strcmp(argv[i],"--self-test")){
             if(strlen(keyboard_chars)!=36||HOME_VIDEOS!=4||HOME_CATEGORIES!=6||TCOUNT!=3||NAV_TAB_COUNT!=6){fputs("Self-test FAIL\n",stderr);return 1;}
             if(SEARCH_RESULTS!=40){fputs("Self-test FAIL: result cap\n",stderr);return 1;}
@@ -1758,6 +2191,7 @@ int main(int argc,char**argv) {
         if(!strcmp(argv[i],"--show-style"))show_style=true;
         else if(!strcmp(argv[i],"--show-about"))show_about=true;
         else if(!strcmp(argv[i],"--show-radio"))show_radio=true;
+        else if(!strcmp(argv[i],"--show-radio-now"))show_radio_now=true;
         else if(!strcmp(argv[i],"--resume-player"))resume_player=true;
         else if(!strcmp(argv[i],"--show-results"))show_results=true;
         else if(!strcmp(argv[i],"--assets")&&i+1<argc)requested_assets=argv[++i];
@@ -1768,7 +2202,7 @@ int main(int argc,char**argv) {
         }
     }
     App*a=(App*)calloc(1,sizeof(App));if(!a){fputs("Out of memory\n",stderr);return 1;}
-    a->running=true;a->dirty=true;a->page=show_about?ABOUT:show_radio?RADIO:show_style?STYLE:resume_player?PLAYER:show_results?RESULTS:HOME;
+    a->running=true;a->dirty=true;a->page=show_about?ABOUT:show_radio_now?RADIO_NOW:show_radio?RADIO:show_style?STYLE:resume_player?PLAYER:show_results?RESULTS:HOME;
     a->from_page=resume_player?RESULTS:HOME;
     int rc=1;
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_EVENTS)!=0){fprintf(stderr,"SDL init: %s\n",SDL_GetError());goto early;}
@@ -1776,7 +2210,7 @@ int main(int argc,char**argv) {
     IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG); /* Enable small JPEG video cards and PNG radio artwork; both optional. */
     if(!discover_assets(a,requested_assets)){
         fputs("Missing assets/themes/midnight.theme. Run from project root or use --assets PATH\n",stderr);goto done;}
-    load_settings(a);init_data_dir(a);a->quality=360;
+    load_settings(a);init_data_dir(a);radio_mix_load(a);game_mix_load(a);radio_hotkeys_load(a);a->quality=360;
     char quality_path[PATH_MAX];
     if(snprintf(quality_path,sizeof(quality_path),"%s/quality.txt",a->data_dir)<(int)sizeof(quality_path)){
         FILE*f=fopen(quality_path,"r");int q=0;
@@ -1814,7 +2248,7 @@ int main(int argc,char**argv) {
         screen_w=display_mode.w; screen_h=display_mode.h;
     }
     if(screen_w!=W || screen_h!=H){
-        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.1",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
+        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.2.6a EXP",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
              screen_w,screen_h,SDL_WINDOW_SHOWN|SDL_WINDOW_FULLSCREEN_DESKTOP);
         if(!a->win){
             fprintf(stderr,"Native fullscreen unavailable (%dx%d): %s; falling back to 640x480\n",
@@ -1822,7 +2256,7 @@ int main(int argc,char**argv) {
         }
     }
     if(!a->win){
-        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.1",SDL_WINDOWPOS_CENTERED,
+        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.2.6a EXP",SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED,W,H,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE);
     }
     if(!a->win){fprintf(stderr,"Window: %s\n",SDL_GetError());goto done;}
@@ -1839,6 +2273,7 @@ int main(int argc,char**argv) {
     a->pad=find_pad();SDL_StartTextInput();
     if(a->page==HOME)start_home_refresh(a,false);
     if(a->page==RESULTS)start_result_thumb_worker(a,true);
+    if(a->page==RADIO_NOW)radio_now_load(a);
     if(a->page==RADIO){
         radio_open(a);
         if(show_radio){
@@ -1862,11 +2297,34 @@ int main(int argc,char**argv) {
         bool preview=a->page==PLAYER && a->current_is_youtube && !a->thumbnail &&
                      (time(NULL)-a->preview_started)<6;
         SDL_Event e;
-        int received=(a->awaiting_stream || preview || a->page==HOME ||
+        int received;
+        if(a->page==RADIO_NOW)received=SDL_WaitEventTimeout(&e,1000);
+        else received=(a->awaiting_stream || preview || a->page==HOME ||
             (a->page==RESULTS && a->result_thumb_pid>0) ||
             (a->page==RADIO && (a->radio_loading || a->radio_logo_pid>0)) ||
             ((a->page==RADIO || a->page==ABOUT) && a->nav_repeat_dir))?SDL_WaitEventTimeout(&e,60):SDL_WaitEvent(&e);
         if(received){handle_event(a,&e);while(SDL_PollEvent(&e))handle_event(a,&e);}
+        if(a->page==RADIO_NOW){
+            Uint32 tick=SDL_GetTicks();
+            if((Uint32)(tick-a->radio_now_last_tick)>=1000){
+                a->radio_now_last_tick=tick;
+                /* The evdev helper saves radio changes in the same file.
+                 * The Now Playing page refreshes that one small local file
+                 * at most once per second; no new threads or controllers. */
+                int former_mix=a->radio_mix_volume,former_game=a->game_mix_volume;
+                radio_mix_load(a);game_mix_load(a);
+                if(a->radio_mix_volume!=former_mix || a->game_mix_volume!=former_game)a->dirty=true;
+                bool alive=radio_now_process_alive(a);
+                if(alive!=a->radio_now_active){
+                    a->radio_now_active=alive;
+                    a->radio_now_blink=true;
+                    a->dirty=true;
+                }else if(alive){
+                    a->radio_now_blink=!a->radio_now_blink;
+                    a->dirty=true;
+                }
+            }
+        }
         if((a->page==RADIO || a->page==ABOUT) && a->nav_repeat_dir){
             Uint32 now=SDL_GetTicks();
             if((int32_t)(now-a->nav_repeat_at)>=0){
@@ -1905,7 +2363,7 @@ int main(int argc,char**argv) {
     rc=0;
 done:
     handoff=a->handoff_wasabi || a->radio_handoff;
-    handoff_kind=a->radio_handoff?RADIO_PLAY_EXIT:a->current_is_youtube?YT_PLAY_EXIT:LOCAL_TEST_EXIT;
+    handoff_kind=a->radio_handoff?a->radio_handoff_kind:a->current_is_youtube?YT_PLAY_EXIT:LOCAL_TEST_EXIT;
     if(a->request_youtube)handoff_kind=YT_SEARCH_EXIT;
     if(a->request_more)handoff_kind=YT_MORE_EXIT;
     if(a->request_clear)handoff_kind=CLEAR_CACHE_EXIT;
