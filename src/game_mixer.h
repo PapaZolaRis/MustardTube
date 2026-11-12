@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
 #ifndef MT_GAME_MIXER_H
 #define MT_GAME_MIXER_H
 #include <sys/types.h>

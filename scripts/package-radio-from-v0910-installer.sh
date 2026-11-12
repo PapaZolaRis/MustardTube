@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Historical packaging workflow. It cannot assemble a compliant Beta 2.2.8
+# build with matching source and GPLv3 notices. Use ../build-package.sh.
+if grep -Fq 'Version 3, 29 June 2007' "$(dirname "$0")/../LICENSE"; then
+  echo 'Historical packaging flow disabled for GPLv3 builds. Run the parent build-package.sh.' >&2
+  exit 2
+fi
 # Non-destructively packages v0.9.11 Radio candidate using the known-good v0.9.10 runtime.
 # Run on the prepared Ubuntu ARM64 cross-compile VM after build-arm64-ubuntu.sh.
 set -euo pipefail

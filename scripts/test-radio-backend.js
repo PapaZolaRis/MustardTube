@@ -27,10 +27,10 @@ const radio=require('./radio-backend.js');
   calls.push(url);
   if(mode==='fallback' && url.includes('radio-browser'))throw Error('offline');
   let body;
-  if(url.includes('/json/countrycodes'))body=JSON.stringify([{name:'GB',stationcount:100},{name:'US',stationcount:20},{name:'XX',stationcount:0}]);
+  if(url.includes('/json/countrycodes'))body=JSON.stringify([{name:'GB',stationcount:100},{name:'US',stationcount:235},{name:'XX',stationcount:0}]);
   else if(url.includes('bycountrycodeexact')){
     const q=new URL(url);const offset=Number(q.searchParams.get('offset'));
-    body=JSON.stringify(Array.from({length:20},(_,i)=>({name:'Station '+(offset+i),stationuuid:String(offset+i).padStart(32,'a'),codec:'MP3',url_resolved:'https://radio.example.org/'+(offset+i)})));
+    body=JSON.stringify(Array.from({length:Math.max(0,Math.min(20,235-offset))},(_,i)=>({name:'Station '+(offset+i),stationuuid:String(offset+i).padStart(32,'a'),codec:'MP3',url_resolved:'https://radio.example.org/'+(offset+i)})));
   }else body='#EXTM3U\n#EXTINF:-1,Playlist Station\nhttps://stream.example.org/live.mp3\n';
   return new Response(body,{status:200,headers:{'content-length':String(Buffer.byteLength(body))}});
  };
@@ -41,6 +41,11 @@ const radio=require('./radio-backend.js');
  assert(calls.some(u=>u.includes('bycountrycodeexact')&&u.includes('order=name')));
  r=await radio.stations('US',20);assert.equal(r.total,40);
  assert.equal(fs.readFileSync(path.join(dir,'radio-stations.tsv'),'utf8').trim().split('\n').length,40);
+ for(let offset=40;offset<240;offset+=20)r=await radio.stations('US',offset);
+ assert.equal(r.total,235);
+ assert.equal(r.hasMore,false);
+ assert.equal(fs.readFileSync(path.join(dir,'radio-stations.tsv'),'utf8').trim().split('\n').length,235);
+ assert.equal(fs.readFileSync(path.join(dir,'radio-pagination.tsv'),'utf8').trim(),'US|||240|||0');
  // Background images are optional, capped, and cached by station ID.
  fs.writeFileSync(path.join(dir,'radio-stations.tsv'), rows[0]+'\n');
  global.fetch=async (url)=>new Response(png,{status:200,headers:{'content-length':String(png.length),'content-type':'image/png'}});
@@ -59,6 +64,17 @@ const radio=require('./radio-backend.js');
  mode='fallback';r=await radio.stations('GB',0);assert.equal(r.source,'Country M3U');assert.equal(r.total,1);
  assert(fs.readFileSync(path.join(dir,'radio-stations.tsv'),'utf8').includes('Playlist Station'));
  assert(calls.some(x=>x.includes('countries/gb.m3u')));
+ // An M3U with over 80 valid entries must keep all entries across pages.
+ global.fetch=async (url)=>{
+  if(url.includes('/json/'))throw Error('Directory offline');
+  const playlist='#EXTM3U\n'+Array.from({length:107},(_,i)=>
+    `#EXTINF:-1,Playlist Station ${String(i).padStart(3,'0')}\nhttps://stream.example.org/${i}.mp3\n`).join('');
+  return new Response(playlist,{status:200,headers:{'content-length':String(Buffer.byteLength(playlist))}});
+ };
+ for(let offset=0;offset<120;offset+=20)r=await radio.stations('GB',offset);
+ assert.equal(r.total,107);
+ assert.equal(r.hasMore,false);
+ assert.equal(fs.readFileSync(path.join(dir,'radio-stations.tsv'),'utf8').trim().split('\n').length,107);
  await assert.rejects(()=>radio.stations('../ZZ',0));
  global.fetch=original;
  fs.rmSync(dir,{recursive:true,force:true});

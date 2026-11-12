@@ -29,7 +29,7 @@ assert 'else if(a->page==RADIO_NOW)set_page(a,RADIO);' in s
 assert 'case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:cycle_page(a,-1)' in s
 assert 'case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:cycle_page(a,1)' in s
 assert 'case SDLK_F4:open_nav_tab(a,RADIO)' in s
-assert 'if(tab<NAV_TAB_COUNT)open_nav_tab(a,(Page)tab)' in s
+assert 'open_nav_tab(a,(Page)tab)' in s, 'sidebar tab routing absent'
 
 prefix=r'''#include <stdbool.h>
 #include <stdio.h>
@@ -37,7 +37,7 @@ prefix=r'''#include <stdbool.h>
 #include <string.h>
 #include <assert.h>
 #define NAV_TAB_COUNT 6
-typedef enum { HOME,SEARCH,SAVED,RADIO,STYLE,ABOUT,PLAYER,RESULTS,RADIO_NOW } Page;
+typedef enum { HOME,SEARCH,SAVED,RADIO,STYLE,ABOUT,PLAYER,RESULTS,RADIO_NOW,UPDATES,EXTRA } Page;
 typedef struct { Page page,from_page; char status_message[176]; bool radio_active; int directory_visits; } App;
 static bool radio_now_process_alive(App*a){return a->radio_active;}
 static void set_page(App*a,Page p){ a->page=p; if(p==RADIO)a->directory_visits++; }
@@ -57,6 +57,8 @@ int main(void){
     a.page=STYLE;cycle_page(&a,-1);assert(a.page==RADIO&&a.directory_visits==3);
     a.radio_active=true;a.page=PLAYER;a.from_page=SEARCH;
     cycle_page(&a,1);assert(a.page==SAVED&&a.directory_visits==3);
+    a.page=UPDATES;cycle_page(&a,-1);assert(a.page==RADIO_NOW&&a.directory_visits==3);
+    a.page=EXTRA;cycle_page(&a,-1);assert(a.page==STYLE&&a.directory_visits==3);
     puts("PASS: extracted native C L1/R1 Radio tab logic, active/stopped cases, directory escape and routing");
     return 0;
 }

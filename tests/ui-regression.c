@@ -47,7 +47,8 @@ int main(void) {
     assert(a.request_clear && !a.running);
     assert(next_quality(360)==480);
     assert(next_quality(480)==720);
-    assert(next_quality(720)==360);
+    assert(next_quality(720)==1080);
+    assert(next_quality(1080)==360);
     a.page=PLAYER;a.current_is_youtube=true;a.quality=360;
     strcpy(a.current_video.id,"00000000001");
     char ready[100];snprintf(ready,sizeof(ready),"00000000001\n%ld\n360\n",(long)time(NULL)+60);

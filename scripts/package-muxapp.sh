@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Historical packaging workflow. It cannot assemble a compliant Beta 2.2.8
+# build with matching source and GPLv3 notices. Use ../build-package.sh.
+if grep -Fq 'Version 3, 29 June 2007' "$(dirname "$0")/../LICENSE"; then
+  echo 'Historical packaging flow disabled for GPLv3 builds. Run the parent build-package.sh.' >&2
+  exit 2
+fi
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

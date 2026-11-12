@@ -1,5 +1,6 @@
 /* MustardTube display geometry helpers; no SDL or heap allocation needed.
- * MIT licensed; preserve 4:3 logical UI on Andromeda native modes. */
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Preserve 4:3 logical UI on Andromeda native modes. */
 #ifndef MT_DISPLAY_COMPAT_H
 #define MT_DISPLAY_COMPAT_H
 #include <stdint.h>

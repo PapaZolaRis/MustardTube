@@ -23,15 +23,26 @@ for arg do
     end=${arg#ytsearch};end=${end%%:*}
     case "$arg" in *':science space'|*':popular videos today') ;; *) exit 2;; esac
     [ "${MOCK_FAIL:-0}" = 0 ] || exit 2
+    start=1;prev=''
+    for item do
+      if [ "$prev" = '--playlist-start' ];then start="$item";break;fi
+      prev="$item"
+    done
     n=$end
     [ "${MOCK_SHORT:-0}" = 0 ] || n=18
-    awk -v n="$n" -v dup="${MOCK_DUP:-0}" 'BEGIN {for(i=1;i<=n;i++){id=i;if(dup && i>=12 && i<=16)id=i-8;printf "%011d|||Science video %d|||Test Channel|||02:15\n",id,id}}'
+    awk -v start="$start" -v n="$n" -v dup="${MOCK_DUP:-0}" 'BEGIN {for(i=start;i<=n;i++){id=i;if(dup && i>=12 && i<=16)id=i-8;printf "%011d|||Science video %d|||Test Channel|||02:15\n",id,id}}' 
     exit 0;;
   https://www.youtube.com/watch?v=LIVE0000001)
     [ -z "$meta_file" ] || printf 'is_live\n' > "$meta_file"
     # Live video supplies separate video/audio URLs. HD 720p must be selected
     # explicitly and must never be silently mislabeled as a lower resolution.
     case "$*" in
+      *'[height=1080]'*)
+        [ "${MOCK_NO_HD:-0}" = 0 ] || exit 2
+        printf 'https://cdn.example.invalid/video1080.m3u8\n'
+        if [ "${MOCK_SINGLE_LIVE:-0}" = 1 ]; then exit 0; fi
+        :
+        ;;
       *'[height=720]'*)
         [ "${MOCK_NO_HD:-0}" = 0 ] || exit 2
         printf 'https://cdn.example.invalid/video720.m3u8?expire=9999999999\n';;
@@ -44,6 +55,12 @@ for arg do
     [ "${MOCK_HANG:-0}" = 0 ] || sleep 5
     [ "${MOCK_VIDEO_FAIL:-0}" = 0 ] || exit 2
     case "$*" in
+      *'[height=1080]'*)
+        [ "${MOCK_NO_HD:-0}" = 0 ] || exit 2
+        printf 'https://cdn.example.invalid/video1080.m3u8\n'
+        if [ "${MOCK_SINGLE_LIVE:-0}" = 1 ]; then exit 0; fi
+        printf 'https://cdn.example.invalid/audio.m3u8\n'
+        ;;
       *'[height=720]'*)
         [ "${MOCK_NO_HD:-0}" = 0 ] || exit 2
         printf 'https://cdn.example.invalid/vod720.m3u8?expire=9999999999\n'
@@ -69,13 +86,24 @@ backend home
 [ ! -e "$tmp/data/search-results.tsv" ]
 grep -q '^00000000001|||Science video 1|||Test Channel|||02:15$' "$tmp/data/home-results.tsv"
 cp "$tmp/data/home-results.tsv" "$tmp/home-before"
+# Next two refreshes consume the 12-item cached pool without extra extraction.
+: > "$MOCK_CALLS"
+backend home; backend home
+[ "$(wc -l < "$MOCK_CALLS")" -eq 0 ]
+[ "$(wc -l < "$tmp/data/home-results.tsv")" -eq 4 ]
 export MOCK_FAIL=1
 if backend home; then echo 'FAIL: Home refresh should signal failure' >&2; exit 1; fi
-cmp "$tmp/home-before" "$tmp/data/home-results.tsv"
+cmp "$tmp/data/home-results.tsv" "$tmp/data/home-explore-results.tsv"
 unset MOCK_FAIL
 backend home
 [ "$(wc -l < "$tmp/data/home-results.tsv")" -eq 4 ]
-echo 'PASS: Home discovery metadata, offline fallback and independent search cache'
+# Home must be able to show more than 100 *distinct* videos across X refreshes,
+# while never writing more than four visible cards at a time.
+for i in $(seq 1 27); do backend home; [ "$(wc -l < "$tmp/data/home-results.tsv")" -le 4 ]; done
+[ "$(wc -l < "$tmp/data/home-explore-pool.tsv")" -ge 112 ]
+[ "$(cut -d '|' -f1 "$tmp/data/home-explore-pool.tsv" | sort -u | wc -l)" -ge 112 ]
+[ "$(wc -l < "$tmp/data/home-results.tsv")" -eq 4 ]
+echo 'PASS: 4 visible Home cards, >100 unique refresh results, incremental metadata, offline fallback'
 : > "$MOCK_CALLS"
 new_search
 [ "$(count)" -eq 8 ]
@@ -90,11 +118,14 @@ backend more
 [ "$(count)" -eq 19 ]
 [ "$(cat "$tmp/data/search-cursor.txt")" = 24 ]
 [ "$(cat "$tmp/data/next-result-index.txt")" = 11 ]
-backend more; backend more; backend more
-[ "$(count)" -eq 40 ]
+for i in $(seq 1 20); do
+  [ "$(cat "$tmp/data/more-available.txt")" = 1 ] || break
+  backend more
+done
+[ "$(count)" -eq 120 ]
 [ "$(cat "$tmp/data/more-available.txt")" = 0 ]
-[ "$(cut -d '|' -f1 "$tmp/data/search-results.tsv" | sort -u | wc -l)" -eq 40 ]
-echo 'PASS: repeated X, duplicate batches, selection and 40-result limit'
+[ "$(cut -d '|' -f1 "$tmp/data/search-results.tsv" | sort -u | wc -l)" -eq 120 ]
+echo 'PASS: repeated X, duplicate batches, selection and 120-result limit'
 # Failure must preserve list, cursor and retry availability.
 rm "$tmp/data/cached-search-time.txt"
 unset MOCK_DUP
@@ -300,3 +331,26 @@ if grep -R 'cdn.example.invalid' "$tmp/data"/*.log; then echo 'Signed stream URL
 grep -Fq '"$WASABI" --title "$title" "$stream"' packaging/mux_launch.sh
 if grep -Fq 'LIVE only; VOD uses 480p' src/main.c; then echo 'Old misleading HD label remains' >&2; exit 1; fi
 echo 'PASS: genuine 720p recorded HLS, live/VOD separation, private playlist and VOD-mode launcher'
+
+echo 1080 > "$tmp/data/quality.txt"
+for sample in '00000000001 vod_hls' 'LIVE0000001 live'; do
+    set -- $sample
+    printf '%s\n' "$1" > "$tmp/data/selected.txt"
+    backend invalidate
+    backend prefetch
+    [ "$(cat "$tmp/data/stream-kind.txt")" = "$2" ]
+    grep -Fq 'RESOLUTION=1920x1080' "$tmp/cache/live-hls.m3u8"
+    grep -Fq 'video1080.m3u8' "$tmp/cache/live-hls.m3u8"
+done
+backend invalidate
+export MOCK_SINGLE_LIVE=1
+backend prefetch
+[ "$(cat "$tmp/data/stream-kind.txt")" = live_direct ]
+calls=$(wc -l < "$MOCK_CALLS")
+backend resolve
+[ "$(wc -l < "$MOCK_CALLS")" -eq "$calls" ]
+backend invalidate
+export MOCK_NO_HD=1
+if backend prefetch; then exit 1; fi
+grep -Fq 'HD 1080p unavailable' "$tmp/data/status.txt"
+echo 'PASS: exact 1080p recorded, live, direct-live reuse and unavailable formats'

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* MustardTube optional in-game radio hotkeys for muOS Andromeda.
  * Opens evdev read-only, never uses EVIOCGRAB/uinput, and never edits OS hotkeys.
  * Runs only while a background radio process is alive; closes on deletion.

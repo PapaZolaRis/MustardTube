@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* MustardTube Beta 2.2.2 -- optional independent GAME mix.
  * No PipeWire libraries, no resident service, no emulator-name allowlist.
  * Only one unambiguous non-radio AUDIO OUTPUT stream may be adjusted.

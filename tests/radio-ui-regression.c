@@ -37,11 +37,23 @@ int main(void){
     f=fopen(file,"r");assert(f);char name[140],url[800];assert(fgets(name,sizeof(name),f));assert(fgets(url,sizeof(url),f));fclose(f);
     assert(!strncmp(url,"https://radio.example.org",25));
     radio_toggle_favourite(a,&a->stations[0]);assert(a->favourite_count==0);
+    /* More than 80 stations must load safely, retaining alphabetical navigation. */
+    snprintf(file,sizeof(file),"%s/radio-stations.tsv",tmp);
+    f=fopen(file,"w");assert(f);
+    for(int i=0;i<155;i++)
+        assert(fprintf(f,"%032x|||Station %03d|||MP3|||https://radio.example.org/%d|||US|||-\n",i+1,i,i)>0);
+    assert(fclose(f)==0);
+    snprintf(file,sizeof(file),"%s/radio-pagination.tsv",tmp);
+    f=fopen(file,"w");assert(f);fputs("US|||160|||0\n",f);assert(fclose(f)==0);
+    radio_load_stations(a);assert(a->station_count==155);
+    assert(a->radio_next_offset==160 && !a->radio_has_more);
+    assert(!strcmp(a->stations[154].name,"Station 154"));
+    snprintf(file,sizeof(file),"%s/radio-pagination.tsv",tmp);unlink(file);
     snprintf(file,sizeof(file),"%s/radio-stations.tsv",tmp);unlink(file);
     snprintf(file,sizeof(file),"%s/radio-countries.tsv",tmp);unlink(file);
     snprintf(file,sizeof(file),"%s/radio-favourites.tsv",tmp);unlink(file);
     snprintf(file,sizeof(file),"%s/radio-selected.txt",tmp);unlink(file);
     snprintf(file,sizeof(file),"%s/radio-last-country.txt",tmp);unlink(file);
-    rmdir(tmp);free(a);
-    puts("PASS: country/station UI parsing, favourites persistence, validated radio selection and handoff");return 0;
+    rmdir(tmp);free(a->stations);free(a);
+    puts("PASS: 155-station dynamic UI, safe paging, favourites, validated radio selection and handoff");return 0;
 }

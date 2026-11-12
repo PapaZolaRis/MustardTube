@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: GPL-3.0-only
 /* MustardTube Beta 2.2 - experimental audio-only process supervisor.
  * Short-lived Node controller: only the separately packaged ffplay-radio stays alive.
  * No PortMaster, no stdin/keyboard ownership, no framebuffer/SDL video display.

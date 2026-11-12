@@ -32,6 +32,8 @@ sh scripts/youtube-backend.sh home music
 [ -f "$tmp/data/home-explore-updated.txt" ]
 [ -f "$tmp/data/home-music-updated.txt" ]
 cp "$tmp/data/home-music-results.tsv" "$tmp/musicsafe"
+# Simulate a later discovery page requiring network after the short mock feed ends.
+printf 12 > "$tmp/data/home-music-scan.txt"
 export MUSTARDTUBE_TEST_FAIL=1
 if sh scripts/youtube-backend.sh home music; then echo 'FAIL network error not surfaced';exit 1;fi
 cmp "$tmp/musicsafe" "$tmp/data/home-music-results.tsv"

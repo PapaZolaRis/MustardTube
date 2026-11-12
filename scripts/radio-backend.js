@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: GPL-3.0-only
 'use strict';
 /* MustardTube radio discovery; no external npm packages. No audio downloaded.
  * Data: radio-browser.info (public directory) and country M3U fallback (CC0).
@@ -15,7 +16,7 @@ const API_HOSTS = ['https://de1.api.radio-browser.info','https://de2.api.radio-b
 const PLAYLIST_ORIGIN='https://raw.githubusercontent.com/AlonDrilich/radio-playlists/main/countries/';
 const BATCH=20;
 const MAX_COUNTRIES=250;
-const MAX_STATIONS=80;
+
 const LOGO_CACHE=path.join(dataDir,'radio-logo-cache');
 const LOGO_MAX_BYTES=48*1024, LOGO_MAX_PIXEL=128, LOGO_CACHE_LIMIT=3*1024*1024;
 function validLogoUrl(value){
@@ -83,26 +84,30 @@ function parseM3U(m3u,country){const entries=[];let name='';for(let line of m3u.
  else if(line && !line.startsWith('#')){entries.push({name:name||'Internet radio',url:line,codec:'AUDIO'});name='';}
  }return stationRows(entries,country);}
 async function stations(country,offset){
- if(!validCountry(country)||!Number.isInteger(offset)||offset<0||offset>=MAX_STATIONS||offset%BATCH!==0)throw Error('Invalid country or offset');
- let rows,source='Radio Browser';
+ if(!validCountry(country)||!Number.isSafeInteger(offset)||offset<0||offset%BATCH!==0)throw Error('Invalid country or offset');
+ let rows,source='Radio Browser',hasMore=false;
  try{
   let raw=await api(`/json/stations/bycountrycodeexact/${country}?hidebroken=true&order=name&reverse=false&offset=${offset}&limit=${BATCH}`,90000);
   let result=JSON.parse(raw);if(!Array.isArray(result))throw Error('Invalid radio stations');
   rows=stationRows(result,country);
+  hasMore=result.length===BATCH;
   if(!rows.length && offset===0)throw Error('No stations');
  }catch(e){
-  let m3u=await limitedFetch(PLAYLIST_ORIGIN+country.toLowerCase()+'.m3u',300000,8500);
-  rows=parseM3U(m3u,country).sort(compareStationRow).slice(offset,offset+BATCH);source='Country M3U';
+  let m3u=await limitedFetch(PLAYLIST_ORIGIN+country.toLowerCase()+'.m3u',8*1024*1024,12000);
+  const playlist=parseM3U(m3u,country).sort(compareStationRow);
+  rows=playlist.slice(offset,offset+BATCH);hasMore=playlist.length>offset+BATCH;source='Country M3U';
  }
  const file='radio-stations.tsv';let previous=[];
  if(offset>0){try{previous=fs.readFileSync(path.join(dataDir,file),'utf8').trimEnd().split('\n').filter(x=>x.split('|||')[4]===country);}catch{}}
- // Deduplicate within and across pages. Strict memory bound: 80 stations.
+ // Deduplicate every returned page without imposing a station-count ceiling.
+ // The network response stays bounded per request, and the SDL UI grows only on demand.
  const seen=new Set();let merged=[];
- for(let line of [...previous,...rows]){let parts=line.split('|||'),id=parts[0];if(parts.length!==6||seen.has(id))continue;seen.add(id);merged.push(line);if(merged.length>=MAX_STATIONS)break;}
+ for(let line of [...previous,...rows]){let parts=line.split('|||'),id=parts[0];if(parts.length!==6||seen.has(id))continue;seen.add(id);merged.push(line);}
  merged.sort(compareStationRow);
  atomic(file,merged.length?merged.join('\n')+'\n':'');
  atomic('radio-status.txt',`Loaded ${merged.length} stations (${source})\n`);
- return {count:rows.length,total:merged.length,source};
+ atomic('radio-pagination.tsv',`${country}|||${offset+BATCH}|||${hasMore?1:0}\n`);
+ return {count:rows.length,total:merged.length,source,hasMore};
 }
 function imageDimensions(buffer){
  if(buffer.length<24)return null;
@@ -151,7 +156,7 @@ function trimLogoCache(){
  }
 }
 async function logos(kind,country,offset){
- if(!['stations','favourites'].includes(kind)||!validCountry(country)||!Number.isInteger(offset)||offset<0||offset>80||offset%7!==0)
+ if(!['stations','favourites'].includes(kind)||!validCountry(country)||!Number.isSafeInteger(offset)||offset<0||offset%7!==0)
   throw Error('Invalid logo page');
  let rows=[];
  const fn=kind==='favourites'?'radio-favourites.tsv':'radio-stations.tsv';

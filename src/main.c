@@ -1,8 +1,10 @@
 #define _DEFAULT_SOURCE
 /* MustardTube v0.9.11 Beta 2.2.1 - low-power native radio improvements.
    Based on the Beta 2.1 display compatibility release; original video paths preserved.
-   Copyright (c) 2026 MustardTube contributors. MIT licence.
+   Copyright (c) 2026 MustardTube contributors.
+   SPDX-License-Identifier: GPL-3.0-only
    Home shows genuinely fetched YouTube discovery videos, not invented trending rankings. */
+#include "release.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <SDL_image.h>
@@ -37,34 +39,35 @@
 #define HOME_CACHE_TTL 3600
 #define NAV_TAB_COUNT 6
 #define RADIO_MAX_COUNTRIES 250
-#define RADIO_MAX_STATIONS 80
 #define RADIO_MAX_FAVORITES 32
 #define RADIO_PLAY_EXIT 82
 #define RADIO_BACKGROUND_START_EXIT 84
 #define RADIO_BACKGROUND_STOP_EXIT 85
 #define RADIO_NATIVE_START_EXIT 86
 #define RADIO_NATIVE_STOP_EXIT 87
-#define SEARCH_RESULTS 40
+#define SEARCH_RESULTS 120
 #define YT_MORE_EXIT 80
 #define CLEAR_CACHE_EXIT 81
 #define CLEAR_HISTORY_EXIT 83
+#define UPDATE_CHECK_EXIT 88
+#define UPDATE_DOWNLOAD_EXIT 89
 #define YT_SEARCH_EXIT 78
 #define YT_PLAY_EXIT 77
 #define LOCAL_TEST_EXIT 79
-#define TCOUNT 3
+#define TCOUNT 4
 #define KEY_COUNT 39
 #define MAX_QUERY 95
 
-typedef enum { HOME, SEARCH, SAVED, RADIO, STYLE, ABOUT, PLAYER, RESULTS, RADIO_NOW } Page;
+typedef enum { HOME, SEARCH, SAVED, RADIO, STYLE, ABOUT, PLAYER, RESULTS, RADIO_NOW, UPDATES, EXTRA } Page;
 typedef enum { FS_11, FS_13, FS_15, FS_19, FS_23, FS_29, FS_COUNT } FontSize;
 typedef struct {
     char name[32];
-    SDL_Color bg, bg2, surface, alt, selected, text, muted, accent, secondary, outline;
+    SDL_Color bg, bg2, surface, alt, selected, text, muted, accent, accent_ink, accent_text, secondary, outline;
 } Theme;
 /* Input from the bundled yt-dlp resolver is parsed as bounded, validated TSV. */
 typedef struct {char id[16], title[176], channel[84], duration[24];} YoutubeResult;
 
-static const char *theme_files[TCOUNT] = {"midnight", "forest", "paper"};
+static const char *theme_files[TCOUNT] = {"midnight", "forest", "paper", "acidbloom"};
 static const char *page_names[NAV_TAB_COUNT] = {"Home", "Search", "Recent", "Radio", "Settings", "About"};
 static const char *home_category_labels[HOME_CATEGORIES] = {"Explore", "Popular", "For You", "Music", "Gaming", "Tech"};
 static const char *home_category_keys[HOME_CATEGORIES] = {"explore", "popular", "foryou", "music", "gaming", "tech"};
@@ -84,8 +87,10 @@ typedef struct {
 typedef struct {
     SDL_Window *win;
     SDL_Renderer *r;
-    SDL_Texture *background_texture; /* ~1.2 MiB static background; rebuilt on theme change. */
-    SDL_Texture *thumbnail; /* Selected video details thumbnail. */
+        SDL_Texture *thumbnail; /* Selected video details thumbnail. */
+    SDL_Texture *brand_icon; /* Transparent mascot, dark themes; cached. */
+    SDL_Texture *brand_icon_paper; /* Transparent mascot with ink outline, Paper only. */
+    bool brand_icon_checked, brand_icon_paper_checked;
     SDL_Texture *home_thumbs[HOME_VIDEOS]; /* Maximum four bounded Home thumbnails. */
     SDL_Texture *result_thumbs[RESULTS_VISIBLE]; /* Four visible Search result thumbnails. */
     char result_thumb_ids[RESULTS_VISIBLE][16];
@@ -101,6 +106,12 @@ typedef struct {
     int theme_id;
     bool running, dirty, handoff_wasabi, request_youtube, request_more, wasabi_missing, more_available;
     bool current_is_youtube;
+    bool request_update_check, request_update_download;
+    bool update_beta, update_auto;
+    int update_selected, note_pos;
+    Uint32 update_last_poll;
+    char update_state[32], update_detail[150], update_release[64], update_size[40];
+    int update_progress; /* -1 means no active download; bounded 0..100 otherwise. */
     bool awaiting_stream, stream_failed, request_clear, request_clear_history;
     long wait_display;
     time_t preview_started, wait_started;
@@ -114,8 +125,12 @@ typedef struct {
     YoutubeResult home_videos[HOME_VIDEOS];
     char home_feedback[100];
     RadioCountry countries[RADIO_MAX_COUNTRIES];
-    RadioStation stations[RADIO_MAX_STATIONS], favourites[RADIO_MAX_FAVORITES];
+    RadioStation *stations; /* Dynamically sized; only metadata for loaded stations. */
+    size_t station_capacity;
+    RadioStation favourites[RADIO_MAX_FAVORITES];
     int country_count, country_idx, station_count, station_idx, favourite_count, favourite_idx;
+    int radio_next_offset;
+    bool radio_has_more;
     int radio_mode; /* 0 countries, 1 stations, 2 favourites */
     int about_scroll; /* Scrollable user manual and legal notice. */
     int nav_repeat_dir; /* Gamepad held-D-pad scrolling only in Radio/About. */
@@ -140,7 +155,6 @@ typedef struct {
     int radio_mix_volume; /* PipeWire stream volume, independent of game audio. */
     int game_mix_volume; /* Saved preferred game level during active radio. */
     int radio_now_slider; /* 0 radio, 1 game; D-pad UP/DOWN selects. */
-    bool radio_mix_edit; /* SELECT on Settings toggles lightweight mixer. */
     int radio_hotkeys_mode; /* 0 OFF, 1 RADIO, 2 RADIO+GAME; no OS edits. */
     char worker_id[16];
     Uint32 play_started;
@@ -234,17 +248,19 @@ static void text_center(App *a,FontSize fs,const char *str,int x,int y,int width
 }
 static void set_default_theme(Theme *t) {
     memset(t,0,sizeof(*t));strcpy(t->name,"Midnight");
-    t->bg=color(10,17,32);t->bg2=color(17,30,52);t->surface=color(23,36,58);
-    t->alt=color(29,48,73);t->selected=color(42,58,81);t->text=color(246,245,240);
-    t->muted=color(165,181,201);t->accent=color(244,198,91);t->secondary=color(119,218,194);
-    t->outline=color(52,69,95);
+    /* Default only when a theme file omits a field; matches Midnight. */
+    t->bg=color(16,20,24);t->bg2=t->bg;t->surface=color(32,40,48);
+    t->alt=color(40,51,60);t->selected=color(52,67,76);t->text=color(245,242,234);
+    t->muted=color(186,197,200);t->accent=color(242,190,75);t->accent_ink=t->accent;
+    t->accent_text=color(16,20,24);t->secondary=color(146,189,176);
+    t->outline=color(83,99,109);
 }
 static void theme_field(Theme *t,const char *key,const char *v) {
     if(!strcmp(key,"name"))snprintf(t->name,sizeof(t->name),"%s",v);
 #define TF(k,field) else if(!strcmp(key,k))t->field=from_hex(v,t->field)
     TF("background",bg);TF("background_bottom",bg2);TF("surface",surface);
     TF("surface_alt",alt);TF("surface_selected",selected);TF("text",text);
-    TF("muted",muted);TF("accent",accent);TF("secondary",secondary);TF("outline",outline);
+    TF("muted",muted);TF("accent",accent);TF("accent_ink",accent_ink);TF("accent_text",accent_text);TF("secondary",secondary);TF("outline",outline);
 #undef TF
 }
 static bool read_theme(App *a,int id) {
@@ -260,7 +276,6 @@ static bool read_theme(App *a,int id) {
         theme_field(&t,start,eq);
     }
     fclose(f);a->theme=t;a->theme_id=id;a->dirty=true;
-    if(a->background_texture){SDL_DestroyTexture(a->background_texture);a->background_texture=NULL;}
     clear_cache(a);return true;
 }
 static bool exists(const char *path) {FILE*f=fopen(path,"rb");if(!f)return false;fclose(f);return true;}
@@ -560,22 +575,49 @@ static void radio_load_countries(App*a){
     if(a->country_idx>=n)a->country_idx=0;a->dirty=true;
 }
 static void radio_load_stations(App*a){
-    char selected_id[sizeof(a->stations[0].id)]={0};
+    char selected_id[sizeof(((RadioStation*)0)->id)]={0};
     if(a->station_count>0 && a->station_idx>=0 && a->station_idx<a->station_count)
         snprintf(selected_id,sizeof(selected_id),"%s",a->stations[a->station_idx].id);
     char path[PATH_MAX];if(snprintf(path,sizeof(path),"%s/radio-stations.tsv",a->data_dir)>=(int)sizeof(path))return;
     FILE*f=fopen(path,"r");if(!f)return;
-    int n=0;char line[2150];
-    while(n<RADIO_MAX_STATIONS && fgets(line,sizeof(line),f)){
+    RadioStation *list=NULL;size_t capacity=0;
+    int n=0;bool allocation_failed=false;char line[2150];
+    while(fgets(line,sizeof(line),f)){
         RadioStation st;if(!radio_parse_station(line,&st))continue;
         if(strcmp(st.country,a->radio_selected_country))continue;
-        a->stations[n++]=st;
+        if((size_t)n==capacity){
+            size_t next=capacity?capacity*2:64;
+            if(next<capacity || next>SIZE_MAX/sizeof(*list) || next>(size_t)INT_MAX){allocation_failed=true;break;}
+            RadioStation*grown=realloc(list,next*sizeof(*list));
+            if(!grown){allocation_failed=true;break;}
+            list=grown;capacity=next;
+        }
+        list[n++]=st;
     }
     fclose(f);
-    qsort(a->stations,(size_t)n,sizeof(a->stations[0]),compare_station);
+    if(allocation_failed){
+        free(list);
+        snprintf(a->radio_status,sizeof(a->radio_status),"Not enough memory to load this station directory.");
+        a->dirty=true;return;
+    }
+    if(n>1)qsort(list,(size_t)n,sizeof(*list),compare_station);
+    free(a->stations);a->stations=list;a->station_capacity=capacity;
     a->station_count=n;
     if(selected_id[0])for(int i=0;i<n;i++)if(!strcmp(selected_id,a->stations[i].id)){a->station_idx=i;break;}
-    if(a->station_idx>=n)a->station_idx=0;a->dirty=true;
+    if(a->station_idx>=n)a->station_idx=0;
+    /* The next API offset must not be inferred from filtered/deduplicated rows. */
+    a->radio_next_offset=((n+19)/20)*20;a->radio_has_more=true;
+    if(snprintf(path,sizeof(path),"%s/radio-pagination.tsv",a->data_dir)<(int)sizeof(path)){
+        FILE *meta=fopen(path,"r");if(meta){
+            char country[4]={0};int next=0,more=0;
+            if(fscanf(meta,"%3[^|]|||%d|||%d",country,&next,&more)==3 &&
+               !strcmp(country,a->radio_selected_country) && next>=20 && next%20==0){
+                a->radio_next_offset=next;a->radio_has_more=(more!=0);
+            }
+            fclose(meta);
+        }
+    }
+    a->dirty=true;
 }
 static void radio_load_favourites(App*a){
     char path[PATH_MAX];if(snprintf(path,sizeof(path),"%s/radio-favourites.tsv",a->data_dir)>=(int)sizeof(path))return;
@@ -905,6 +947,7 @@ static void stop_prefetch(App*a) {
         a->worker_pid=0;
     }
     a->worker_id[0]=0;
+
 }
 /* Home discovery is independent from playback and cannot block the UI. */
 static void stop_home_worker(App*a) {
@@ -1114,13 +1157,13 @@ static void start_prefetch(App*a) {
     _exit(127);
 }
 static int next_quality(int quality) {
-    return quality==360?480:quality==480?720:360;
+    return quality==360?480:quality==480?720:quality==720?1080:360;
 }
 static void toggle_quality(App*a) {
     if(a->page!=PLAYER || !a->current_is_youtube || a->awaiting_stream)return;
     stop_prefetch(a);
     a->quality=next_quality(a->quality);
-    write_data_file(a,"quality.txt",a->quality==360?"360\n":a->quality==480?"480\n":"720\n");
+    write_data_file(a,"quality.txt",a->quality==360?"360\n":a->quality==480?"480\n":a->quality==720?"720\n":"1080\n");
     a->stream_failed=false;start_prefetch(a);a->dirty=true;
 }
 static void show_video_details(App*a) {
@@ -1226,163 +1269,197 @@ static const char *font_location(void) {
     for(int i=0;fonts[i];i++)if(exists(fonts[i]))return fonts[i];
     return NULL;
 }
-/* Render the decorative background once per theme, not on every key press.
-   A single 640x480 ARGB texture costs 1.17 MiB but replaces ~900 small draw
-   calls per frame on software SDL renderers. Preserve the old look exactly. */
-static void paint_surface_circle(SDL_Surface *s,int cx,int cy,int radius,SDL_Color col) {
-    const Uint32 pixel=SDL_MapRGBA(s->format,col.r,col.g,col.b,255);
-    for(int dy=-radius;dy<=radius;dy++) {
-        const int rx=(int)sqrt((double)(radius*radius-dy*dy));
-        SDL_Rect row={cx-rx,cy+dy,2*rx+1,1};
-        SDL_FillRect(s,&row,pixel); /* SDL clips to 640x480 automatically. */
-    }
-}
-static bool prepare_background(App *a) {
-    SDL_Surface *s=SDL_CreateRGBSurfaceWithFormat(0,W,H,32,SDL_PIXELFORMAT_ARGB8888);
-    if(!s)return false;
-    for(int y=0;y<H;y++) {
-        SDL_Color c=blend(a->theme.bg,a->theme.bg2,y,H);
-        SDL_Rect row={0,y,W,1};
-        SDL_FillRect(s,&row,SDL_MapRGBA(s->format,c.r,c.g,c.b,255));
-    }
-    paint_surface_circle(s,605,192,111,blend(a->theme.bg2,a->theme.alt,2,5));
-    paint_surface_circle(s,614,180,79,blend(a->theme.bg2,a->theme.surface,1,2));
-    a->background_texture=SDL_CreateTextureFromSurface(a->r,s);
-    SDL_FreeSurface(s);
-    return a->background_texture!=NULL;
-}
+/* Deliberately flat background: one clear, no 1.17 MiB texture or
+ * large circles behind controls. Avoids visual noise in Paper and keeps the
+ * low-power SDL renderer path cheap on the H700. */
 static void draw_background(App *a) {
-    if(!a->background_texture)prepare_background(a);
-    if(a->background_texture) {
-        SDL_RenderCopy(a->r,a->background_texture,NULL,NULL);
-        return;
+    fill(a,0,0,W,H,a->theme.bg);
+}
+/* Beta 2.3.2: unified 4:3 sidebar on ALL pages, one equal-size video-card
+ * system across Home and Results. Presentation only: no new textures, timers,
+ * workers or streaming/radio processes. Four thumbnails maximum per view. */
+#define MT_SIDE_X 14
+#define MT_SIDE_Y 88
+#define MT_SIDE_W 114
+#define MT_SIDE_ROW_Y 112
+#define MT_SIDE_ROW_STEP 48
+#define MT_HOME_X 145
+#define MT_HOME_W 477
+#define MT_HOME_CATEGORY_Y 143
+#define MT_HOME_CATEGORY_W 77
+#define MT_HOME_CARD_Y 185
+#define MT_HOME_CARD_STEP 59
+#define MT_HOME_CARD_H 54
+#define MT_CARD_THUMB_W 86
+#define MT_CARD_THUMB_H 48
+
+/* muOS uses a monochrome glyph, while the app header uses a compact,
+ * transparent rendition of the approved mascot. The Paper version has an
+ * ink-coloured outline. Both are cached and loaded only when needed. */
+static SDL_Texture *load_brand_texture(App *a,const char *relative) {
+    char path[PATH_MAX];
+    if(snprintf(path,sizeof(path),"%s/%s",a->asset_dir,relative)>=(int)sizeof(path))return NULL;
+    SDL_Surface *s=IMG_Load(path);
+    if(!s)return NULL;
+    SDL_Texture *tex=SDL_CreateTextureFromSurface(a->r,s);
+    SDL_FreeSurface(s);
+    if(tex)SDL_SetTextureBlendMode(tex,SDL_BLENDMODE_BLEND);
+    return tex;
+}
+static void draw_brand_icon(App *a, int x, int y, int size) {
+    bool paper=a->theme_id==2;
+    if(paper && !a->brand_icon_paper_checked){
+        a->brand_icon_paper_checked=true;
+        a->brand_icon_paper=load_brand_texture(a,"branding/header-paper.png");
     }
-    /* If texture creation fails, draw using the original low-memory path. */
-    for(int y=0;y<H;y++)fill(a,0,y,W,1,blend(a->theme.bg,a->theme.bg2,y,H));
-    circle(a,605,192,111,blend(a->theme.bg2,a->theme.alt,2,5));
-    circle(a,614,180,79,blend(a->theme.bg2,a->theme.surface,1,2));
+    if(!paper && !a->brand_icon_checked){
+        a->brand_icon_checked=true;
+        /* In the installed muxapp the dark full-colour icon lives in /grid;
+         * in the source checkout it lives in /assets/branding. */
+        a->brand_icon=load_brand_texture(a,"branding/header-dark.png");
+        if(!a->brand_icon)a->brand_icon=load_brand_texture(a,"../grid/mustardtube.png");
+    }
+    SDL_Texture *tex=paper?a->brand_icon_paper:a->brand_icon;
+    if(tex){SDL_Rect d={x,y,size,size};SDL_RenderCopy(a->r,tex,NULL,&d);}
+    else{
+        rounded(a,x,y,size,size,9,a->theme.accent);
+        circle(a,x+size/2,y+size/2,size/3,a->theme.accent_text);
+        triangle(a,x+size/2+3,y+size/2,size/6,a->theme.accent);
+    }
 }
 static void draw_header(App *a) {
     Theme*t=&a->theme;
-    rounded(a,18,17,39,39,12,t->accent);
-    rounded(a,26,25,23,23,7,blend(t->accent,t->bg,1,6));
-    triangle(a,37,36,8,t->bg);
-    print_text(a,FS_19,"Mustard",65,17,t->text);
-    int name_width=80;
-    TTF_SizeUTF8(a->fonts[FS_19],"Mustard",&name_width,NULL);
-    print_text(a,FS_19,"Tube",65+name_width,17,t->accent);
-    print_text(a,FS_11,"Built for muOS",66,41,t->muted);
-    /* Six native tabs reuse the original SDL controller handling. */
-    for(int i=0;i<NAV_TAB_COUNT;i++){
-        int x=279+i*57;bool selected=((int)a->page==i || (a->page==RADIO_NOW && i==RADIO));
-        if(selected)outline(a,x,18,55,36,11,t->outline,t->selected);
-        text_center(a,FS_11,page_names[i],x,29,55,selected?t->accent:t->muted);
-    }
-    fill(a,18,66,604,1,t->outline);
+    draw_brand_icon(a,18,8,51);
+    print_text(a,FS_23,"Mustard",75,14,t->text);
+    int name_width=84;
+    TTF_SizeUTF8(a->fonts[FS_23],"Mustard",&name_width,NULL);
+    print_text(a,FS_23,"Tube",75+name_width,14,t->accent_ink);
+    print_text(a,FS_11,"WATCH  ·  LISTEN  ·  PLAY",76,43,t->muted);
+    print_text(a,FS_11,"LB/RB  PAGES",516,26,t->muted);
+    fill(a,18,68,604,1,t->outline);
 }
-static void draw_home(App*a) {
+static void draw_home_sidebar(App *a) {
+    Theme*t=&a->theme;
+    int active=(int)a->page;
+    if(a->page==RESULTS)active=SEARCH;
+    if(a->page==PLAYER)active=a->from_page==HOME?HOME:SEARCH;
+    if(a->page==RADIO_NOW)active=RADIO;
+    if(a->page==UPDATES)active=STYLE;
+    outline(a,MT_SIDE_X,MT_SIDE_Y,MT_SIDE_W,331,12,t->outline,t->surface);
+    for(int i=0;i<NAV_TAB_COUNT;i++){
+        int y=MT_SIDE_ROW_Y+i*MT_SIDE_ROW_STEP;
+        bool selected=i==active;
+        if(selected)rounded(a,MT_SIDE_X+6,y,MT_SIDE_W-12,38,9,t->accent);
+        else if(i!=0)fill(a,MT_SIDE_X+15,y-5,MT_SIDE_W-30,1,blend(t->surface,t->outline,1,2));
+        print_text(a,FS_13,page_names[i],MT_SIDE_X+16,y+11,selected?t->accent_text:t->text);
+    }
+}
+static void home_video_card(App *a, int i) {
+    Theme*t=&a->theme;
+    YoutubeResult *v=&a->home_videos[i];
+    const int x=MT_HOME_X,y=MT_HOME_CARD_Y+i*MT_HOME_CARD_STEP;
+    const int tx=x+6,ty=y+3,tw=MT_CARD_THUMB_W,th=MT_CARD_THUMB_H;
+    const int desc=tx+tw+11,avail=x+MT_HOME_W-desc-9;
+    bool selected=a->home_idx==i;
+    outline(a,x,y,MT_HOME_W,MT_HOME_CARD_H,9,selected?t->accent:t->outline,selected?t->selected:t->surface);
+    rounded(a,tx,ty,tw,th,6,t->alt);
+    if(a->home_thumbs[i]){SDL_Rect dst={tx,ty,tw,th};SDL_RenderCopy(a->r,a->home_thumbs[i],NULL,&dst);}
+    else{circle(a,tx+tw/2,ty+th/2,13,t->accent);triangle(a,tx+tw/2+4,ty+th/2,6,t->accent_text);}
+    print_ellipsis(a,FS_13,v->title,desc,y+7,avail,t->text);
+    print_ellipsis(a,FS_11,v->channel,desc,y+30,avail-61,t->muted);
+    print_ellipsis(a,FS_11,v->duration,x+MT_HOME_W-63,y+30,52,t->secondary);
+}
+static void draw_home(App *a) {
     Theme*t=&a->theme;
     char heading[72];snprintf(heading,sizeof(heading),"Videos / %s",home_category_labels[a->home_category]);
-    print_text(a,FS_23,heading,20,80,t->text);
-    print_text(a,FS_11,a->home_loading?"Loading selected category...  |  X Refresh":
-        "LEFT/RIGHT Category   UP/DOWN Videos   X Refresh",20,108,t->muted);
+    print_ellipsis(a,FS_19,heading,MT_HOME_X,87,MT_HOME_W,t->text);
+    print_text(a,FS_11,a->home_loading?"Refreshing discovery...":"Real videos, selected for you",MT_HOME_X,115,t->muted);
     for(int i=0;i<HOME_CATEGORIES;i++){
-        int x=20+i*101;bool active=i==a->home_category;
-        outline(a,x,128,96,27,8,active?t->accent:t->outline,active?t->selected:t->surface);
-        text_center(a,FS_11,home_category_labels[i],x,136,96,active?t->accent:t->text);
+        int x=MT_HOME_X+i*80;
+        bool active=(i==a->home_category);
+        outline(a,x,MT_HOME_CATEGORY_Y,MT_HOME_CATEGORY_W,26,7,active?t->accent:t->outline,active?t->accent:t->surface);
+        text_center(a,FS_11,home_category_labels[i],x,MT_HOME_CATEGORY_Y+7,MT_HOME_CATEGORY_W,active?t->accent_text:t->text);
     }
     if(a->home_count==0){
-        outline(a,18,164,604,254,16,t->outline,t->surface);
-        rounded(a,281,184,77,77,20,t->alt);
-        circle(a,319,222,27,t->accent);triangle(a,326,222,11,t->bg);
-        text_center(a,FS_19,a->home_loading?"Loading video cards...":"No videos loaded yet",20,285,600,t->text);
-        print_ellipsis(a,FS_13,a->home_feedback[0]?a->home_feedback:
-            a->home_category==2?"Watch a video to start your local recommendations.":
-            "Check Wi-Fi. Press X to retry or switch category.",52,328,544,t->muted);
+        outline(a,MT_HOME_X,MT_HOME_CARD_Y,MT_HOME_W,231,14,t->outline,t->surface);
+        circle(a,MT_HOME_X+MT_HOME_W/2,239,27,t->accent);
+        triangle(a,MT_HOME_X+MT_HOME_W/2+8,239,12,t->accent_text);
+        text_center(a,FS_19,a->home_loading?"Loading videos...":"No videos yet",MT_HOME_X,289,MT_HOME_W,t->text);
+        print_ellipsis(a,FS_11,a->home_feedback[0]?a->home_feedback:"Check Wi-Fi, or press X to retry.",MT_HOME_X+18,343,MT_HOME_W-36,t->muted);
         return;
     }
-    for(int i=0;i<a->home_count&&i<HOME_VIDEOS;i++){
-        int x=18,y=163+i*64;bool active=a->home_idx==i;
-        YoutubeResult*v=&a->home_videos[i];
-        outline(a,x,y,604,60,9,active?t->accent:t->outline,active?t->selected:t->surface);
-        rounded(a,x+7,y+5,104,50,6,blend(t->alt,t->surface,1,3));
-        if(a->home_thumbs[i]){SDL_Rect dst={x+7,y+5,104,50};SDL_RenderCopy(a->r,a->home_thumbs[i],NULL,&dst);}
-        else{circle(a,x+58,y+29,16,t->accent);triangle(a,x+63,y+29,6,t->bg);}
-        print_ellipsis(a,FS_15,v->title,x+121,y+7,465,t->text);
-        print_ellipsis(a,FS_11,v->channel,x+121,y+35,378,t->muted);
-        print_ellipsis(a,FS_11,v->duration,x+532,y+35,54,t->secondary);
-    }
+    for(int i=0;i<a->home_count&&i<HOME_VIDEOS;i++)home_video_card(a,i);
 }
 static void draw_search(App*a) {
     Theme*t=&a->theme;
-    print_text(a,FS_23,"Search",20,83,t->text);
-    print_text(a,FS_13,"Enter a title, creator, or topic using the D-pad.",20,115,t->muted);
-    outline(a,19,146,602,51,13,t->accent,t->surface);
-    print_text(a,FS_15,"?",35,158,t->accent);
-    if(!a->query[0])print_text(a,FS_15,"Search for videos...",60,160,t->muted);
-    else print_text(a,FS_15,a->query,60,160,t->text);
-    print_text(a,FS_11,a->search_feedback[0]?a->search_feedback:"Select SEARCH to look up live YouTube videos.",23,204,t->secondary);
+    print_text(a,FS_23,"Search",MT_HOME_X,83,t->text);
+    print_ellipsis(a,FS_11,"Enter a title, creator or topic with the D-pad.",MT_HOME_X,116,MT_HOME_W,t->muted);
+    outline(a,MT_HOME_X,143,MT_HOME_W,48,11,t->accent,t->surface);
+    if(!a->query[0])print_text(a,FS_15,"Search for videos...",MT_HOME_X+13,156,t->muted);
+    else print_ellipsis(a,FS_15,a->query,MT_HOME_X+13,156,MT_HOME_W-26,t->text);
+    print_ellipsis(a,FS_11,a->search_feedback[0]?a->search_feedback:"START searches YouTube; A enters a character.",MT_HOME_X,197,MT_HOME_W,t->secondary);
     for(int i=0;i<36;i++){
-        int row=i/9,col=i%9,x=25+col*66,y=227+row*40;
+        int row=i/9,col=i%9,x=149+col*51,y=219+row*40;
         bool sel=a->keyboard_idx==i;
-        rounded(a,x,y,60,34,8,sel?t->accent:t->alt);
+        rounded(a,x,y,45,34,7,sel?t->accent:t->alt);
         char label[2]={keyboard_chars[i],0};
-        text_center(a,FS_15,label,x,y+7,60,sel?t->bg:t->text);
+        text_center(a,FS_15,label,x,y+7,45,sel?t->accent_text:t->text);
     }
     const char* names[3]={"SPACE","DELETE","SEARCH"};
     for(int j=0;j<3;j++){
-        int x=25+j*199;bool sel=a->keyboard_idx==36+j;
-        rounded(a,x,391,191,34,8,sel?t->accent:t->alt);
-        text_center(a,FS_13,names[j],x,400,191,sel?t->bg:t->text);
+        int x=149+j*156;bool sel=a->keyboard_idx==36+j;
+        rounded(a,x,384,148,35,8,sel?t->accent:t->alt);
+        text_center(a,FS_13,names[j],x,394,148,sel?t->accent_text:t->text);
     }
 }
 static void draw_saved(App*a) {
     Theme*t=&a->theme;
-    print_text(a,FS_23,"Recent activity",20,87,t->text);
-    print_text(a,FS_13,"Return to your last search without reloading YouTube.",20,120,t->muted);
-    outline(a,19,158,602,223,15,t->outline,t->surface);
-    print_text(a,FS_11,"LAST SEARCH",37,180,t->secondary);
-    print_ellipsis(a,FS_19,a->query[0]?a->query:"Nothing searched yet",37,210,550,t->text);
+    print_text(a,FS_23,"Recent activity",MT_HOME_X,83,t->text);
+    print_ellipsis(a,FS_11,"Return to your previous search without retyping.",MT_HOME_X,116,MT_HOME_W,t->muted);
+    outline(a,MT_HOME_X,151,MT_HOME_W,259,14,t->outline,t->surface);
+    print_text(a,FS_11,"LAST SEARCH",MT_HOME_X+15,173,t->secondary);
+    print_ellipsis(a,FS_19,a->query[0]?a->query:"Nothing searched yet",MT_HOME_X+15,204,MT_HOME_W-30,t->text);
     for(int i=0;i<2;i++) {
-        int y=260+i*54;
+        int y=266+i*55;
         bool active=a->saved_idx==i;
-        outline(a,36,y,568,45,10,active?t->accent:t->outline,active?t->selected:t->alt);
-        print_text(a,FS_15,i==0?"Search again":"Open last results",52,y+11,t->text);
-        print_text(a,FS_11,i==0?"A  SEARCH":"A  OPEN",488,y+15,active?t->accent:t->muted);
+        outline(a,MT_HOME_X+14,y,MT_HOME_W-28,45,10,active?t->accent:t->outline,active?t->selected:t->alt);
+        print_text(a,FS_15,i==0?"Search again":"Open last results",MT_HOME_X+26,y+11,t->text);
+        print_text(a,FS_11,i==0?"A SEARCH":"A OPEN",MT_HOME_X+359,y+15,active?t->accent_ink:t->muted);
     }
-    print_text(a,FS_11,"Previous results are stored only if a search succeeded.",36,394,t->muted);
+    print_ellipsis(a,FS_11,"Only successful searches are retained.",MT_HOME_X+15,390,MT_HOME_W-25,t->muted);
 }
 static void draw_results(App*a) {
     Theme*t=&a->theme;
-    print_text(a,FS_23,"YouTube results",20,82,t->text);
-    print_text(a,FS_13,a->more_available?"A Details   |   X Load more   |   B Edit search":"A Details   |   B Edit search",20,115,t->muted);
-    print_ellipsis(a,FS_11,a->status_message,20,136,588,t->secondary);
+    print_text(a,FS_23,"YouTube results",MT_HOME_X,83,t->text);
+    print_ellipsis(a,FS_11,a->more_available?"A Details   X More results   B Edit search":"A Details   B Edit search",MT_HOME_X,114,MT_HOME_W,t->muted);
+    print_ellipsis(a,FS_11,a->status_message,MT_HOME_X,139,MT_HOME_W,t->secondary);
     if(a->result_count==0){
-        rounded(a,19,159,602,220,16,t->surface);
-        print_text(a,FS_19,"No videos returned",46,208,t->text);
-        print_ellipsis(a,FS_13,a->status_message[0]?a->status_message:"Check Wi-Fi and try another search.",46,248,541,t->muted);
+        outline(a,MT_HOME_X,174,MT_HOME_W,237,14,t->outline,t->surface);
+        print_text(a,FS_19,"No videos returned",MT_HOME_X+20,222,t->text);
+        print_ellipsis(a,FS_13,a->status_message[0]?a->status_message:"Check Wi-Fi and try another search.",MT_HOME_X+20,261,MT_HOME_W-40,t->muted);
         return;
     }
-    const int perpage=4;
+    const int perpage=RESULTS_VISIBLE;
     int first=(a->result_idx/perpage)*perpage;
     for(int i=0;i<perpage;i++){
         int idx=first+i;if(idx>=a->result_count)break;
-        YoutubeResult *v=&a->results[idx];int y=154+i*68;
+        YoutubeResult *v=&a->results[idx];
+        int y=174+i*59;
         bool active=idx==a->result_idx;
-        outline(a,19,y,602,62,11,active?t->accent:t->outline,active?t->selected:t->surface);
-        /* Same thumbnail style as Home; only four visible images decoded. */
-        rounded(a,27,y+5,104,52,7,blend(t->alt,t->surface,1,3));
-        if(a->result_thumbs[i]){SDL_Rect dst={27,y+5,104,52};SDL_RenderCopy(a->r,a->result_thumbs[i],NULL,&dst);}
-        else {circle(a,79,y+31,16,t->accent);triangle(a,84,y+31,7,t->bg);}
-        print_ellipsis(a,FS_15,v->title,140,y+8,447,t->text);
-        print_ellipsis(a,FS_11,v->channel,140,y+36,375,t->muted);
-        print_ellipsis(a,FS_11,v->duration,550,y+36,56,t->secondary);
+        outline(a,MT_HOME_X,y,MT_HOME_W,MT_HOME_CARD_H,9,active?t->accent:t->outline,active?t->selected:t->surface);
+        rounded(a,MT_HOME_X+6,y+3,MT_CARD_THUMB_W,MT_CARD_THUMB_H,6,t->alt);
+        if(a->result_thumbs[i]){SDL_Rect dst={MT_HOME_X+6,y+3,MT_CARD_THUMB_W,MT_CARD_THUMB_H};SDL_RenderCopy(a->r,a->result_thumbs[i],NULL,&dst);}
+        else {circle(a,MT_HOME_X+53,y+27,13,t->accent);triangle(a,MT_HOME_X+57,y+27,6,t->accent_text);}
+        const int dx=MT_HOME_X+MT_CARD_THUMB_W+17;
+        print_ellipsis(a,FS_13,v->title,dx,y+7,MT_HOME_W-MT_CARD_THUMB_W-27,t->text);
+        print_ellipsis(a,FS_11,v->channel,dx,y+30,MT_HOME_W-MT_CARD_THUMB_W-90,t->muted);
+        print_ellipsis(a,FS_11,v->duration,MT_HOME_X+MT_HOME_W-63,y+30,53,t->secondary);
     }
     char pagination[96];
     int last=first+perpage;if(last>a->result_count)last=a->result_count;
     snprintf(pagination,sizeof(pagination),"%d-%d of %d  %s",first+1,last,a->result_count,
        a->more_available?"| X: +8":"| end");
-    text_center(a,FS_11,pagination,211,421,218,t->muted);
+    text_center(a,FS_11,pagination,MT_HOME_X,414,MT_HOME_W,t->muted);
 }
 /* The list begins below its heading and status. Seven compact rows fit
  * safely inside y=178..401, leaving y=413 for per-view actions. */
@@ -1391,131 +1468,260 @@ static void draw_results(App*a) {
 #define RADIO_VISIBLE 7
 static void draw_radio(App*a){
     Theme*t=&a->theme;
-    print_text(a,FS_23,"Internet Radio",20,82,t->text);
-    print_text(a,FS_11,"A Now Playing   START BG   SELECT Stop   Settings: Radio Mix",20,112,t->muted);
+    print_text(a,FS_23,"Internet Radio",MT_HOME_X,82,t->text);
+    print_ellipsis(a,FS_11,"A Listen   START Background   SELECT Stop",MT_HOME_X,113,MT_HOME_W,t->muted);
     if(a->radio_background_name[0]){
         char now[175];snprintf(now,sizeof(now),"BG RADIO: %s",a->radio_background_name);
-        print_ellipsis(a,FS_13,now,20,133,595,t->accent);
-    }else if(a->radio_loading)print_text(a,FS_11,"Loading radio directory...",20,134,t->secondary);
-    else if(a->radio_status[0])print_ellipsis(a,FS_11,a->radio_status,20,134,590,t->secondary);
+        print_ellipsis(a,FS_11,now,MT_HOME_X,133,MT_HOME_W,t->accent_ink);
+    }else if(a->radio_loading)print_text(a,FS_11,"Loading radio directory...",MT_HOME_X,133,t->secondary);
+    else if(a->radio_status[0])print_ellipsis(a,FS_11,a->radio_status,MT_HOME_X,133,MT_HOME_W,t->secondary);
     bool countries=a->radio_mode==0, fav=a->radio_mode==2;
     int n=countries?a->country_count:fav?a->favourite_count:a->station_count;
     int idx=countries?a->country_idx:fav?a->favourite_idx:a->station_idx;
     int first=idx/RADIO_VISIBLE*RADIO_VISIBLE;
     int last=first+RADIO_VISIBLE;if(last>n)last=n;
-    print_text(a,FS_13,countries?"COUNTRIES A-Z":fav?"FAVOURITES A-Z":"STATIONS A-Z",20,156,t->accent);
+    print_text(a,FS_13,countries?"COUNTRIES A-Z":fav?"FAVOURITES A-Z":"STATIONS A-Z",MT_HOME_X,156,t->accent_ink);
     char location[72];
     if(n)snprintf(location,sizeof(location),"%d-%d / %d",first+1,last,n);
     else snprintf(location,sizeof(location),"0 stations");
-    print_text(a,FS_11,location,526,157,t->muted);
+    print_text(a,FS_11,location,542,157,t->muted);
     if(n>RADIO_VISIBLE){
-        int track_y=RADIO_LIST_Y,track_h=RADIO_VISIBLE*RADIO_ROW_H-3;
-        rounded(a,617,track_y,3,track_h,1,t->outline);
-        int thumb_h=(RADIO_VISIBLE*track_h)/n;
+        const int track_h=RADIO_VISIBLE*RADIO_ROW_H-3;
+        rounded(a,619,RADIO_LIST_Y,3,track_h,1,t->outline);
+        int thumb_h=(int)((long long)RADIO_VISIBLE*track_h/n);
         if(thumb_h<16)thumb_h=16;
-        int thumb_y=track_y+(n>RADIO_VISIBLE?(first*(track_h-thumb_h)/(n-RADIO_VISIBLE)):0);
-        rounded(a,616,thumb_y,5,thumb_h,2,t->accent);
+        int thumb_y=RADIO_LIST_Y+(n>RADIO_VISIBLE?(int)((long long)first*(track_h-thumb_h)/(n-RADIO_VISIBLE)):0);
+        rounded(a,618,thumb_y,4,thumb_h,2,t->accent);
     }
     for(int j=0;j<RADIO_VISIBLE && first+j<n;j++){
         int ix=first+j,y=RADIO_LIST_Y+j*RADIO_ROW_H;
         bool active=ix==idx;
-        outline(a,20,y,593,29,7,active?t->accent:t->outline,active?t->selected:t->surface);
+        outline(a,MT_HOME_X,y,MT_HOME_W-7,29,7,active?t->accent:t->outline,active?t->selected:t->surface);
         if(countries){
             RadioCountry*c=&a->countries[ix];
-            radio_draw_country_flag(a,c->code,30,y+3);
-            print_ellipsis(a,FS_13,c->name,77,y+5,435,t->text);
+            radio_draw_country_flag(a,c->code,MT_HOME_X+8,y+3);
+            print_ellipsis(a,FS_13,c->name,MT_HOME_X+56,y+5,MT_HOME_W-145,t->text);
             char count[32];snprintf(count,sizeof(count),"%d",c->count);
-            print_text(a,FS_11,count,543,y+8,t->muted);
+            print_text(a,FS_11,count,MT_HOME_X+407,y+8,t->muted);
         }else{
             RadioStation*st=fav?&a->favourites[ix]:&a->stations[ix];
             SDL_Texture*logo=radio_station_logo(a,j,st);
-            if(logo){SDL_Rect d={30,y+2,25,25};SDL_RenderCopy(a->r,logo,NULL,&d);}
-            else {rounded(a,30,y+2,25,25,5,t->bg2);print_text(a,FS_11,"FM",33,y+9,t->secondary);}
-            print_ellipsis(a,FS_13,st->name,63,y+5,445,t->text);
-            print_ellipsis(a,FS_11,st->codec,547,y+8,54,t->muted);
-            if(radio_is_favourite(a,st))print_text(a,FS_11,"*",521,y+7,t->accent);
+            if(logo){SDL_Rect d={MT_HOME_X+8,y+2,25,25};SDL_RenderCopy(a->r,logo,NULL,&d);}
+            else {rounded(a,MT_HOME_X+8,y+2,25,25,5,t->bg2);print_text(a,FS_11,"FM",MT_HOME_X+11,y+9,t->secondary);}
+            print_ellipsis(a,FS_13,st->name,MT_HOME_X+42,y+5,MT_HOME_W-135,t->text);
+            print_ellipsis(a,FS_11,st->codec,MT_HOME_X+402,y+8,53,t->muted);
+            if(radio_is_favourite(a,st))print_text(a,FS_11,"*",MT_HOME_X+377,y+7,t->accent_ink);
         }
     }
-    if(!n)print_ellipsis(a,FS_13,countries?"No countries. Press X to retry.":fav?"No saved stations yet.":a->radio_loading?"Loading stations...":"No stations. Press X to retry.",28,235,565,t->text);
-    print_text(a,FS_11,countries?"A Open    X Refresh    Y Favourites    START Now Playing":
-        fav?"A Listen    START BG    SELECT Stop    Y Unfavourite":
-        "A Listen    START BG    SELECT Stop    X More    Y Fav",20,415,t->muted);
+    if(!n)print_ellipsis(a,FS_13,countries?"No countries. Press X to retry.":fav?"No saved stations yet.":a->radio_loading?"Loading stations...":"No stations. Press X to retry.",MT_HOME_X+10,235,MT_HOME_W-20,t->text);
+    print_ellipsis(a,FS_11,countries?"A Open  X Refresh  Y Favourites  START Playing":
+        fav?"A Listen  START BG  SELECT Stop  Y Unfavourite":
+        "A Listen  START BG  SELECT Stop  X More  Y Fav",MT_HOME_X,414,MT_HOME_W,t->muted);
 }
 /* One FFplay decoder powers foreground and background radio.  Only the tiny
  * status dot changes once per second.  No FFT, spinning texture, network
  * polling, or SDL renderer remains running after leaving for a game. */
 static void draw_radio_now(App*a){
     Theme*t=&a->theme;
-    print_text(a,FS_23,"Radio / Now Playing",20,82,t->text);
-    print_text(a,FS_11,"Built-in audio-only player - no Wasabi screen",20,112,t->muted);
-    outline(a,20,135,600,267,16,t->outline,t->surface);
-    rounded(a,39,154,125,125,17,t->alt);
+    print_text(a,FS_23,"Radio / Now Playing",MT_HOME_X,82,t->text);
+    print_ellipsis(a,FS_11,"Lightweight built-in player, no video decoder",MT_HOME_X,113,MT_HOME_W,t->muted);
+    outline(a,MT_HOME_X,138,MT_HOME_W,270,14,t->outline,t->surface);
+    rounded(a,MT_HOME_X+14,154,86,86,12,t->alt);
     if(!a->radio_now_logo_checked){
         (void)radio_station_logo(a,0,&a->radio_now_station);
         a->radio_now_logo_checked=true;
     }
     SDL_Texture*logo=a->radio_logos[0];
-    if(logo){SDL_Rect dst={45,160,113,113};SDL_RenderCopy(a->r,logo,NULL,&dst);}
-    else {circle(a,101,208,40,t->accent);text_center(a,FS_23,"FM",61,194,80,t->bg);}
-    rounded(a,182,157,171,25,7,a->radio_now_active?t->selected:t->alt);
-    circle(a,195,170,5,a->radio_now_active?
+    if(logo){SDL_Rect dst={MT_HOME_X+18,158,78,78};SDL_RenderCopy(a->r,logo,NULL,&dst);}
+    else {circle(a,MT_HOME_X+57,197,31,t->accent);text_center(a,FS_19,"FM",MT_HOME_X+24,185,65,t->accent_text);}
+    rounded(a,MT_HOME_X+112,155,175,26,7,a->radio_now_active?t->selected:t->alt);
+    circle(a,MT_HOME_X+125,168,5,a->radio_now_active?
         (a->radio_now_blink?t->accent:t->outline):t->muted);
-    print_text(a,FS_13,a->radio_now_active?"RADIO ACTIVE":"RADIO STOPPED",207,162,
-               a->radio_now_active?t->accent:t->muted);
-    print_ellipsis(a,FS_23,a->radio_now_station.name[0]?a->radio_now_station.name:"Internet Radio",182,199,412,t->text);
+    print_text(a,FS_13,a->radio_now_active?"RADIO ACTIVE":"RADIO STOPPED",MT_HOME_X+139,159,
+               a->radio_now_active?t->accent_ink:t->muted);
+    print_ellipsis(a,FS_19,a->radio_now_station.name[0]?a->radio_now_station.name:"Internet Radio",MT_HOME_X+112,192,MT_HOME_W-129,t->text);
     char sub[95];snprintf(sub,sizeof(sub),"%s  %s",a->radio_now_station.codec[0]?a->radio_now_station.codec:"Audio stream",
        a->radio_now_station.country);
-    print_text(a,FS_13,sub,184,238,t->muted);
-    print_ellipsis(a,FS_11,a->radio_now_active?"Player running (stream may be buffering)":"Choose A to retry or B for stations",182,262,415,t->secondary);
+    print_text(a,FS_11,sub,MT_HOME_X+114,222,t->muted);
+    print_ellipsis(a,FS_11,a->radio_now_active?"Player running (stream may buffer)":"Press A to retry; B for stations",MT_HOME_X+15,249,MT_HOME_W-29,t->secondary);
     char vol[80];
     snprintf(vol,sizeof(vol),"%s Radio Volume  %d%%",a->radio_now_slider==0?">":" ",a->radio_mix_volume);
-    print_text(a,FS_13,vol,39,287,a->radio_now_slider==0?t->accent:t->text);
-    rounded(a,39,317,562,10,5,t->outline);
-    if(a->radio_mix_volume)rounded(a,39,317,562*a->radio_mix_volume/100,10,5,t->accent);
+    print_text(a,FS_13,vol,MT_HOME_X+15,273,a->radio_now_slider==0?t->accent_ink:t->text);
+    rounded(a,MT_HOME_X+15,297,MT_HOME_W-30,9,4,t->outline);
+    if(a->radio_mix_volume)rounded(a,MT_HOME_X+15,297,(MT_HOME_W-30)*a->radio_mix_volume/100,9,4,t->accent);
     snprintf(vol,sizeof(vol),"%s Game Volume  %d%%",a->radio_now_slider==1?">":" ",a->game_mix_volume);
-    print_text(a,FS_13,vol,39,336,a->radio_now_slider==1?t->accent:t->text);
-    rounded(a,39,365,562,10,5,t->outline);
-    if(a->game_mix_volume)rounded(a,39,365,562*a->game_mix_volume/100,10,5,t->accent);
-    print_text(a,FS_11,"UP/DOWN choose mix  LEFT/RIGHT -/+5%  Stop: Game 100%",39,384,t->muted);
-    print_text(a,FS_11,a->radio_hotkeys_mode==2?
+    print_text(a,FS_13,vol,MT_HOME_X+15,322,a->radio_now_slider==1?t->accent_ink:t->text);
+    rounded(a,MT_HOME_X+15,347,MT_HOME_W-30,9,4,t->outline);
+    if(a->game_mix_volume)rounded(a,MT_HOME_X+15,347,(MT_HOME_W-30)*a->game_mix_volume/100,9,4,t->accent);
+    print_ellipsis(a,FS_11,"UP/DOWN Mix  LEFT/RIGHT +/-5%  Stop: game 100%",MT_HOME_X+15,372,MT_HOME_W-30,t->muted);
+    print_ellipsis(a,FS_11,a->radio_hotkeys_mode==2?
          "X: In-game RADIO+GAME":a->radio_hotkeys_mode==1?
          "X: In-game RADIO (press to enable GAME)":
-         "X: In-game OFF (cycle to RADIO+GAME)",39,405,t->secondary);
+         "X: In-game OFF",MT_HOME_X+15,392,MT_HOME_W-30,t->secondary);
     print_ellipsis(a,FS_11,a->radio_now_notice[0]?a->radio_now_notice:
-         "START: Games    SELECT: Stop    Y: Wasabi    B: List",20,419,599,t->secondary);
+         "START Games  SELECT Stop  Y Wasabi  B List",MT_HOME_X,416,MT_HOME_W,t->secondary);
 }
 static void draw_style(App*a) {
     Theme*t=&a->theme;
-    print_text(a,FS_23,"Settings",20,85,t->text);
-    print_ellipsis(a,FS_11,a->status_message[0]?a->status_message:"Themes, storage and app performance",20,116,600,t->muted);
-    print_text(a,FS_13,"APPEARANCE",20,138,t->secondary);
+    print_text(a,FS_23,"Settings",MT_HOME_X,83,t->text);
+    print_ellipsis(a,FS_11,a->status_message[0]?a->status_message:"Appearance, storage and app performance",MT_HOME_X,114,MT_HOME_W,t->muted);
+    print_text(a,FS_13,"APPEARANCE",MT_HOME_X,139,t->secondary);
+    /* Four equal-size samples in a 2x2 controller-friendly grid. No per-frame
+     * image load, file I/O or extra SDL texture allocation. */
+    static const SDL_Color preview_bg[TCOUNT]={{16,20,24,255},{17,36,30,255},{245,240,230,255},{25,15,43,255}};
+    static const SDL_Color preview_card[TCOUNT]={{32,40,48,255},{36,58,49,255},{255,252,246,255},{48,32,71,255}};
+    static const SDL_Color preview_accent[TCOUNT]={{242,190,75,255},{199,219,145,255},{232,187,104,255},{223,255,99,255}};
     for(int i=0;i<TCOUNT;i++){
-        int x=19+i*206,y=161;bool active=a->style_idx==i;
-        outline(a,x,y,191,154,14,active?t->accent:t->outline,active?t->selected:t->surface);
-        SDL_Color p=i==0?color(14,25,43):i==1?color(24,55,47):color(231,237,230);
-        SDL_Color a1=i==0?color(244,198,91):i==1?color(216,232,142):color(223,174,63);
-        SDL_Color p2=i==0?color(49,69,101):i==1?color(58,104,82):color(184,210,198);
-        rounded(a,x+11,y+11,169,83,10,p);
-        rounded(a,x+21,y+23,85,12,4,p2);
-        rounded(a,x+21,y+43,125,9,4,p2);
-        rounded(a,x+21,y+64,67,12,5,a1);
-        print_text(a,FS_15,i==0?"Midnight":i==1?"Forest":"Paper",x+13,y+107,t->text);
-        if(i==a->theme_id)print_text(a,FS_11,"ACTIVE",x+115,y+112,t->secondary);
+        int x=MT_HOME_X+(i%2)*244,y=161+(i/2)*80;
+        bool active=a->style_idx==i;
+        outline(a,x,y,233,72,11,active?t->accent:t->outline,active?t->selected:t->surface);
+        rounded(a,x+9,y+9,83,54,7,preview_bg[i]);
+        rounded(a,x+16,y+18,69,28,5,preview_card[i]);
+        rounded(a,x+21,y+23,26,18,4,preview_accent[i]);
+        rounded(a,x+51,y+25,29,4,2,preview_accent[i]);
+        rounded(a,x+51,y+34,22,3,2,preview_accent[i]);
+        print_text(a,FS_13,i==0?"Midnight":i==1?"Forest":i==2?"Paper":"Acid Bloom",x+101,y+14,t->text);
+        if(i==a->theme_id)print_text(a,FS_11,"ACTIVE",x+101,y+42,t->accent_ink);
+        else if(active)print_text(a,FS_11,"A  APPLY",x+101,y+42,t->muted);
     }
-    print_text(a,FS_13,"INDEPENDENT RADIO VOLUME",20,321,t->secondary);
-    rounded(a,20,346,600,76,13,a->radio_mix_edit?t->selected:t->surface);
-    char mix[140];
-    snprintf(mix,sizeof(mix),"Radio: %d%%   SELECT: %s   LEFT/RIGHT: %s",
-             a->radio_mix_volume,a->radio_mix_edit?"Done":"Adjust",a->radio_mix_edit?"- / + 5%":"Themes");
-    print_text(a,FS_13,mix,34,352,a->radio_mix_edit?t->accent:t->text);
-    int barw=150;rounded(a,459,376,barw,7,3,t->outline);
-    if(a->radio_mix_volume>0)rounded(a,459,376,barw*a->radio_mix_volume/100,7,3,t->accent);
-    print_text(a,FS_11,"Game audio unaffected. Hardware volume controls master sound.",34,374,t->muted);
-    print_text(a,FS_11,a->radio_hotkeys_mode==2?
-      "RADIO+GAME: L2+R2 LEFT/RIGHT radio, UP/DOWN game":
-      a->radio_hotkeys_mode==1?
-      "RADIO ONLY: L2+R2 LEFT/RIGHT   START: Radio+Game":
-      "IN-GAME OFF   START: Radio only > Radio+Game > Off",34,397,t->secondary);
+    print_text(a,FS_13,"IN-GAME HOTKEYS",MT_HOME_X,320,t->secondary);
+    rounded(a,MT_HOME_X,345,MT_HOME_W,75,12,t->surface);
+    print_text(a,FS_13,a->radio_hotkeys_mode==2?"Mode: RADIO+GAME":
+        a->radio_hotkeys_mode==1?"Mode: RADIO ONLY":"Mode: OFF",MT_HOME_X+14,352,t->text);
+    print_ellipsis(a,FS_11,"START cycles OFF / RADIO / RADIO+GAME",MT_HOME_X+14,377,MT_HOME_W-28,t->muted);
+    print_ellipsis(a,FS_11,"Set both volumes in Radio / Now Playing.",MT_HOME_X+14,398,MT_HOME_W-28,t->secondary);
+    print_text(a,FS_11,"SELECT  Software updates",MT_HOME_X+246,324,t->secondary);
+}
+static void update_read_status(App *a) {
+    char state[32]="not checked", detail[150]="Select CHECK to contact GitHub Releases", release[64]="", size[40]="";
+    int progress=-1;
+    char file[PATH_MAX];
+    if(snprintf(file,sizeof(file),"%s/ota-status.txt",a->data_dir)<(int)sizeof(file)) {
+        FILE *f=fopen(file,"r");
+        if(f){char line[210];while(fgets(line,sizeof(line),f)){
+            if(!strncmp(line,"state=",6))safe_line(state,sizeof(state),line+6);
+            else if(!strncmp(line,"detail=",7))safe_line(detail,sizeof(detail),line+7);
+            else if(!strncmp(line,"release=",8))safe_line(release,sizeof(release),line+8);
+            else if(!strncmp(line,"size=",5))safe_line(size,sizeof(size),line+5);
+            else if(!strncmp(line,"progress=",9)){
+                char *end=NULL;long v=strtol(line+9,&end,10);
+                if(end!=line+9 && (*end=='\n'||*end=='\r'||*end=='\0') && v>=0 && v<=100)progress=(int)v;
+            }
+        }fclose(f);}
+    }
+    if(strcmp(a->update_state,state)||strcmp(a->update_detail,detail)||
+       strcmp(a->update_release,release)||strcmp(a->update_size,size)||a->update_progress!=progress){
+        snprintf(a->update_state,sizeof(a->update_state),"%s",state);
+        snprintf(a->update_detail,sizeof(a->update_detail),"%s",detail);
+        snprintf(a->update_release,sizeof(a->update_release),"%s",release);
+        snprintf(a->update_size,sizeof(a->update_size),"%s",size);
+        a->update_progress=progress;
+        a->dirty=true;
+    }
+}
+static void update_read_channel(App*a){
+    a->update_beta=true;
+    a->update_auto=true;
+    char ac[PATH_MAX];
+    if(snprintf(ac,sizeof(ac),"%s/ota-auto-check.txt",a->data_dir)<(int)sizeof(ac)){
+        FILE*af=fopen(ac,"r");
+        if(af){char setting[12]={0};if(fgets(setting,sizeof(setting),af) && !strncmp(setting,"off",3))a->update_auto=false;fclose(af);}
+    }
+    char p[PATH_MAX];if(snprintf(p,sizeof(p),"%s/ota-channel.txt",a->data_dir)>=(int)sizeof(p))return;
+    FILE*f=fopen(p,"r");if(!f)return;
+    char buf[20]={0};if(fgets(buf,sizeof(buf),f) && !strncmp(buf,"stable",6))a->update_beta=false;
+    fclose(f);
+}
+static void draw_updates(App*a){
+    Theme*t=&a->theme;
+    print_text(a,FS_23,"Software updates",MT_HOME_X,83,t->text);
+    print_text(a,FS_11,"Official GitHub Releases / muOS Andromeda",MT_HOME_X,115,t->muted);
+    outline(a,MT_HOME_X,144,MT_HOME_W,100,11,t->outline,t->surface);
+    print_text(a,FS_13,"Installed: " MT_RELEASE,MT_HOME_X+12,157,t->text);
+    print_ellipsis(a,FS_11,a->update_detail,MT_HOME_X+12,185,MT_HOME_W-24,t->secondary);
+    if(a->update_release[0])print_ellipsis(a,FS_11,a->update_release,MT_HOME_X+12,207,300,t->text);
+    if(a->update_size[0])print_text(a,FS_11,a->update_size,MT_HOME_X+367,207,t->muted);
+    if(!strcmp(a->update_state,"downloading") && a->update_progress>=0 && a->update_progress<=100){
+        // Lightweight theme-aware rectangle: no textures, animations or extra timers.
+        const int x=MT_HOME_X+12,y=225,w=MT_HOME_W-83,h=8;
+        rounded(a,x,y,w,h,4,t->outline);
+        const int completed=w*a->update_progress/100;
+        if(completed>0)rounded(a,x,y,completed,h,completed<8?1:4,t->accent);
+        char pct[12];snprintf(pct,sizeof(pct),"%d%%",a->update_progress);
+        print_text(a,FS_11,pct,MT_HOME_X+MT_HOME_W-53,220,t->text);
+    }
+    const bool ready=!strcmp(a->update_state,"ready");
+    const char *options[]={"Check for updates",
+        ready?"Exit for Archive Manager":"Prepare verified update",
+        a->update_beta?"Channel: Beta":"Channel: Stable",
+        a->update_auto?"Auto-check: On":"Auto-check: Off"};
+    for(int i=0;i<4;i++){
+        int y=250+i*41;bool active=i==a->update_selected;
+        outline(a,MT_HOME_X,y,MT_HOME_W,37,9,active?t->accent:t->outline,active?t->selected:t->surface);
+        print_text(a,FS_13,options[i],MT_HOME_X+13,y+9,active?t->accent_ink:t->text);
+        if(active)print_text(a,FS_11,"A",MT_HOME_X+MT_HOME_W-24,y+10,t->accent_ink);
+    }
+    print_text(a,FS_11,"Install: Applications > Archive Manager",MT_HOME_X,416,t->secondary);
+    print_text(a,FS_11,"Verified download; installed by muOS",MT_HOME_X,431,t->muted);
+}
+static void open_updates(App*a) {
+    update_read_channel(a);
+    a->update_selected=0;
+    set_page(a,UPDATES);
+    update_read_status(a);
+}
+static void activate_updates(App*a){
+    // A running update worker owns the candidate until verification completes.
+    // Navigation remains responsive, but another task must not be launched.
+    if(!strcmp(a->update_state,"checking") || !strcmp(a->update_state,"downloading") ||
+       !strcmp(a->update_state,"verifying") || !strcmp(a->update_state,"backup"))return;
+    if(a->update_selected==2){
+        a->update_beta=!a->update_beta;
+        if(!write_data_file(a,"ota-channel.txt",a->update_beta?"beta\n":"stable\n")){
+            snprintf(a->update_detail,sizeof(a->update_detail),"Unable to save update channel");
+        }else{
+            char p[PATH_MAX];if(snprintf(p,sizeof(p),"%s/ota-status.txt",a->data_dir)<(int)sizeof(p))unlink(p);
+            update_read_status(a);
+        }
+        a->dirty=true;
+    }else if(a->update_selected==3){
+        a->update_auto=!a->update_auto;
+        if(!write_data_file(a,"ota-auto-check.txt",a->update_auto?"on\n":"off\n")){
+            a->update_auto=!a->update_auto;
+            snprintf(a->update_detail,sizeof(a->update_detail),"Unable to save auto-check preference");
+        }
+        a->dirty=true;
+    }else if(a->update_selected==1 && !strcmp(a->update_state,"ready")){
+        // Leave MustardTube cleanly; muOS Archive Manager performs the install.
+        a->running=false;
+    }else{
+        a->request_update_check=a->update_selected==0;
+        a->request_update_download=a->update_selected==1;
+        a->running=false;
+    }
+}
+static void reveal_line(char *dst,size_t cap,const unsigned char *src,size_t n){
+    if(cap==0)return;
+    if(n>=cap)n=cap-1;
+    for(size_t i=0;i<n;i++)dst[i]=(char)(src[i]^0x5d);
+    dst[n]=0;
+}
+static void draw_extra(App*a){
+    Theme*t=&a->theme;
+    static const unsigned char l1[]={0x09, 0x35, 0x38, 0x7d, 0x15, 0x38, 0x3c, 0x2f, 0x29, 0x7d, 0x1f, 0x38, 0x35, 0x34, 0x33, 0x39, 0x7d, 0x10, 0x28, 0x2e, 0x29, 0x3c, 0x2f, 0x39, 0x09, 0x28, 0x3f, 0x38};
+    static const unsigned char l2[]={0x1b, 0x32, 0x2f, 0x7d, 0x19, 0x34, 0x2f, 0x3c, 0x71, 0x7d, 0x19, 0x38, 0x2f, 0x71, 0x7d, 0x0d, 0x2f, 0x34, 0x33, 0x3e, 0x38, 0x2e, 0x2e, 0x7d, 0x7b, 0x7d, 0x10, 0x3c, 0x30, 0x3c, 0x73};
+    static const unsigned char l3[]={0x18, 0x2b, 0x38, 0x2f, 0x24, 0x7d, 0x3a, 0x2f, 0x38, 0x3c, 0x29, 0x7d, 0x3e, 0x2f, 0x38, 0x3c, 0x29, 0x34, 0x32, 0x33, 0x7d, 0x35, 0x3c, 0x2e, 0x7d, 0x3c, 0x7d, 0x2f, 0x38, 0x3c, 0x2e, 0x32, 0x33, 0x7d, 0x3f, 0x38, 0x35, 0x34, 0x33, 0x39, 0x7d, 0x34, 0x29, 0x73};
+    static const unsigned char l4[]={0x04, 0x32, 0x28, 0x7d, 0x3c, 0x2f, 0x38, 0x7d, 0x30, 0x34, 0x33, 0x38, 0x73};
+    static const unsigned char l5[]={0x10, 0x3c, 0x39, 0x38, 0x7d, 0x2a, 0x34, 0x29, 0x35, 0x7d, 0x31, 0x32, 0x2b, 0x38, 0x71, 0x7d, 0x19, 0x3c, 0x39, 0x39, 0x24};
+    char msg[128];
+    circle(a,301,77,22,t->secondary);circle(a,339,77,22,t->secondary);
+    for(int j=0;j<42;j++){int w=84-2*j;fill(a,320-w/2,81+j,w,1,t->secondary);}
+    reveal_line(msg,sizeof(msg),l1,sizeof(l1));text_center(a,FS_19,msg,50,148,540,t->accent_ink);
+    reveal_line(msg,sizeof(msg),l2,sizeof(l2));text_center(a,FS_15,msg,50,206,540,t->text);
+    reveal_line(msg,sizeof(msg),l3,sizeof(l3));text_center(a,FS_13,msg,50,255,540,t->muted);
+    reveal_line(msg,sizeof(msg),l4,sizeof(l4));text_center(a,FS_13,msg,50,278,540,t->muted);
+    fill(a,150,336,340,1,t->outline);
+    reveal_line(msg,sizeof(msg),l5,sizeof(l5));text_center(a,FS_15,msg,50,368,540,t->text);
 }
 /* Self-contained manual: no WebView, markdown runtime or network dependency.
  * Each line is bounded for the 640x480 display; one logical line per row. */
@@ -1523,7 +1729,7 @@ typedef struct {const char *text; bool heading;} AboutLine;
 static const AboutLine ABOUT_LINES[]={
     {"WELCOME",true},
     {"MustardTube - lightweight video and Internet Radio",false},
-    {"Version 0.9.11 Beta 2.2.6a EXP | PapaZolaRis",false},
+    {"Version " MT_RELEASE " | PapaZolaRis",false},
     {"Independent community project for muOS.",false},
     {"",false},
     {"REQUIREMENTS",true},
@@ -1557,7 +1763,7 @@ static const AboutLine ABOUT_LINES[]={
     {"HOME - VIDEOS",true},
     {"Explore / Popular / For You / Music / Gaming / Tech.",false},
     {"LEFT/RIGHT selects a category, UP/DOWN a video.",false},
-    {"A opens details; X refreshes the chosen feed.",false},
+    {"A opens details; X shows next four discovery videos.",false},
     {"Cards are search-based, not official YouTube Trending.",false},
     {"For You uses local viewing signals where available.",false},
     {"",false},
@@ -1565,13 +1771,13 @@ static const AboutLine ABOUT_LINES[]={
     {"Use D-pad and A to type with the on-screen keyboard.",false},
     {"START submits; X loads more on results screens.",false},
     {"A on results opens the video detail page.",false},
-    {"Up to 40 search results; thumbnails load as needed.",false},
+    {"Up to 120 search results; 4 thumbnails at a time.",false},
     {"",false},
     {"PLAYBACK & QUALITY",true},
     {"A on video details plays through stock Wasabi.",false},
-    {"Y cycles 360p (default), 480p and optional 720p.",false},
+    {"Y cycles 360p (default), 480p, 720p and 1080p.",false},
     {"360p/480p seeking works on compatible recordings.",false},
-    {"Recorded 720p: EXPERIMENTAL - NO SEEK.",false},
+    {"720p and 1080p streaming is experimental.",false},
     {"Live streams: NO SEEK (all qualities).",false},
     {"Some streams may fail due to format or URL expiry.",false},
     {"In Wasabi: MENU + START returns to MustardTube.",false},
@@ -1628,7 +1834,11 @@ static const AboutLine ABOUT_LINES[]={
     {"Anbernic or MustardOS / muOS.",false},
     {"",false},
     {"LICENSING AND ATTRIBUTION",true},
-    {"MustardTube source: MIT licence.",false},
+    {"MustardTube: Free and Open Source Software.",false},
+    {"License: GNU GPL version 3 only (GPL-3.0-only).",false},
+    {"Official source and license information:",false},
+    {"github.com/PapaZolaRis/MustardTube",false},
+    {"Prior MIT releases retain their original terms.",false},
     {"Third-party licences ship in the app's licenses dir.",false},
     {"Country flag artwork requires Twemoji attribution.",false},
     {"Radio metadata is provided by external directories.",false},
@@ -1661,52 +1871,50 @@ static void about_jump_section(App*a,int direction){
 }
 static void draw_about(App *a) {
     Theme*t=&a->theme;
-    print_text(a,FS_23,"About / User Guide",20,83,t->text);
-    print_text(a,FS_11,"Manual, controls, troubleshooting, legal notice",20,115,t->muted);
+    print_text(a,FS_23,"About / User Guide",MT_HOME_X,83,t->text);
+    print_ellipsis(a,FS_11,"Manual, controls, legal notices and credits",MT_HOME_X,115,MT_HOME_W,t->muted);
     char progress[80];
     int last=a->about_scroll+ABOUT_VISIBLE;if(last>ABOUT_COUNT)last=ABOUT_COUNT;
     snprintf(progress,sizeof(progress),"%d-%d / %d",a->about_scroll+1,last,ABOUT_COUNT);
-    print_text(a,FS_11,progress,527,140,t->secondary);
-    print_text(a,FS_11,"UP/DOWN Scroll (hold)   LEFT/RIGHT Page",20,140,t->accent);
-    outline(a,18,159,604,253,12,t->outline,t->surface);
+    print_text(a,FS_11,progress,MT_HOME_X+383,141,t->secondary);
+    print_text(a,FS_11,"UP/DOWN Scroll    LEFT/RIGHT Page",MT_HOME_X,141,t->accent_ink);
+    outline(a,MT_HOME_X,160,MT_HOME_W,252,12,t->outline,t->surface);
     for(int i=0;i<ABOUT_VISIBLE && a->about_scroll+i<ABOUT_COUNT;i++){
         const AboutLine*line=&ABOUT_LINES[a->about_scroll+i];
-        int y=167+i*18;
+        int y=168+i*18;
         if(line->heading){
-            rounded(a,29,y-1,568,18,4,t->bg2);
-            print_ellipsis(a,FS_11,line->text,37,y,550,t->accent);
-        }else{
-            print_ellipsis(a,FS_11,line->text,37,y,551,t->text);
-        }
+            rounded(a,MT_HOME_X+9,y-1,MT_HOME_W-25,18,4,t->bg2);
+            print_ellipsis(a,FS_11,line->text,MT_HOME_X+16,y,MT_HOME_W-47,t->accent_ink);
+        }else print_ellipsis(a,FS_11,line->text,MT_HOME_X+16,y,MT_HOME_W-47,t->text);
     }
-    int track_y=164,track_h=241,thumb_h=32;
-    rounded(a,608,track_y,4,track_h,2,t->outline);
+    const int track_y=164,track_h=240,thumb_h=32;
+    rounded(a,MT_HOME_X+MT_HOME_W-13,track_y,4,track_h,2,t->outline);
     int max=ABOUT_COUNT-ABOUT_VISIBLE;
     int thumb_y=track_y+(max>0?a->about_scroll*(track_h-thumb_h)/max:0);
-    rounded(a,607,thumb_y,6,thumb_h,3,t->accent);
-    print_text(a,FS_11,"X/Y Jump sections     LB/RB Tabs     B Home",20,416,t->muted);
+    rounded(a,MT_HOME_X+MT_HOME_W-14,thumb_y,6,thumb_h,3,t->accent);
+    print_text(a,FS_11,"X/Y Sections    LB/RB Tabs    B Home",MT_HOME_X,418,t->muted);
 }
 static void draw_player(App*a) {
     Theme*t=&a->theme;
-    rounded(a,19,79,602,276,16,color(8,12,20));
+    print_text(a,FS_23,a->current_is_youtube?"Video details":"Playback test",MT_HOME_X,83,t->text);
+    rounded(a,MT_HOME_X,129,MT_HOME_W,211,14,color(8,12,20));
     if(a->current_is_youtube && a->thumbnail){
-        SDL_Rect dst={113,86,414,233};
+        SDL_Rect dst={MT_HOME_X+84,137,309,174};
         SDL_RenderCopy(a->r,a->thumbnail,NULL,&dst);
-        rounded(a,297,177,46,46,23,t->accent);
-        triangle(a,322,200,11,t->bg);
+        rounded(a,MT_HOME_X+214,204,44,44,22,t->accent);
+        triangle(a,MT_HOME_X+237,226,11,t->accent_text);
     }else{
-        circle(a,320,187,42,t->surface);
-        circle(a,320,187,35,t->accent);
-        triangle(a,327,187,13,t->bg);
+        circle(a,MT_HOME_X+MT_HOME_W/2,212,40,t->surface);
+        circle(a,MT_HOME_X+MT_HOME_W/2,212,33,t->accent);
+        triangle(a,MT_HOME_X+MT_HOME_W/2+8,212,13,t->accent_text);
     }
-    rounded(a,206,283,229,34,9,t->accent);
-    text_center(a,FS_13,a->awaiting_stream?"PREPARING VIDEO...":a->current_is_youtube?"A  PLAY":"A  TEST SOUND",206,292,229,t->bg);
+    rounded(a,MT_HOME_X+120,299,237,33,9,t->accent);
+    text_center(a,FS_13,a->awaiting_stream?"PREPARING VIDEO...":a->current_is_youtube?"A  PLAY":"A  TEST SOUND",MT_HOME_X+120,308,237,t->accent_text);
     if(a->current_is_youtube) {
-        print_ellipsis(a,FS_19,a->current_video.title,26,362,566,t->text);
+        print_ellipsis(a,FS_15,a->current_video.title,MT_HOME_X+3,348,MT_HOME_W-6,t->text);
         char line[160];
-        if(a->stream_failed)snprintf(line,sizeof(line),a->quality==720?
-            "HD unavailable. Press Y for 360p, or A to retry.":
-            "Stream unavailable. Press A to retry.");
+        if(a->stream_failed)snprintf(line,sizeof(line),a->quality>=720?
+            "HD unavailable. Y changes quality; A retries.":"Stream unavailable. Press A to retry.");
         else if(a->awaiting_stream)snprintf(line,sizeof(line),"Preparing video... %lds  |  B Cancel",(long)(time(NULL)-a->wait_started));
         else if(stream_is_prepared(a)){
             char kind_path[PATH_MAX];char kind[20]={0};
@@ -1715,48 +1923,56 @@ static void draw_player(App*a) {
                 if(kind_file){fgets(kind,sizeof(kind),kind_file);fclose(kind_file);}
             }
             if(!strncmp(kind,"live",4))snprintf(line,sizeof(line),"LIVE ready  |  %s",a->current_video.channel);
-            else if(a->quality==720)snprintf(line,sizeof(line),"Recorded HD 720p ready  |  %s",a->current_video.channel);
+            else if(a->quality>=720)snprintf(line,sizeof(line),"HD %dp ready  |  %s",a->quality,a->current_video.channel);
             else snprintf(line,sizeof(line),"Stream ready  |  %s",a->current_video.channel);
-        }
-        else if(a->current_video.channel[0])snprintf(line,sizeof(line),"%s  %s",a->current_video.channel,a->current_video.duration);
+        }else if(a->current_video.channel[0])snprintf(line,sizeof(line),"%s  %s",a->current_video.channel,a->current_video.duration);
         else snprintf(line,sizeof(line),"Press A to play.");
-        print_ellipsis(a,FS_13,line,26,391,560,t->muted);
-        const char *quality_label=a->quality==360?
-            "Y Quality: Fast 360p  |  MENU + START returns here":a->quality==480?
-            "Y Quality: Clear 480p  |  MENU + START returns here":
-            "Y Quality: HD 720p (experimental; live + recorded)";
-        print_text(a,FS_11,quality_label,26,412,t->secondary);
+        print_ellipsis(a,FS_13,line,MT_HOME_X+3,377,MT_HOME_W-6,t->muted);
+        const char *quality_label=a->quality==360?"Y 360p Fast | MENU+START to return":
+            a->quality==480?"Y 480p Clear | MENU+START to return":
+            a->quality==720?"Y 720p HD | MENU+START to return":"Y 1080p HD | MENU+START to return";
+        print_ellipsis(a,FS_11,quality_label,MT_HOME_X+3,410,MT_HOME_W-6,t->secondary);
     }else{
-        print_text(a,FS_19,"Test video + audio",26,364,t->text);
-        print_text(a,FS_13,"Local 10-second sample with audible test tone.",26,392,t->muted);
-        print_text(a,FS_11,"H.264 / AAC  -  MENU + START to return here.",26,413,t->secondary);
+        print_text(a,FS_15,"Test video + audio",MT_HOME_X+3,350,t->text);
+        print_text(a,FS_11,"10-second sample with audible test tone.",MT_HOME_X+3,380,t->muted);
+        print_text(a,FS_11,"H.264 / AAC - MENU+START returns here.",MT_HOME_X+3,410,t->secondary);
     }
-    if(a->wasabi_missing) {
-        rounded(a,101,229,438,37,9,t->surface);
-        text_center(a,FS_13,"Wasabi not found. Use muOS Andromeda.",101,238,438,t->accent);
+    if(a->wasabi_missing){
+        rounded(a,MT_HOME_X+22,270,MT_HOME_W-44,26,8,t->surface);
+        text_center(a,FS_11,"Wasabi not found. Use muOS Andromeda.",MT_HOME_X+22,276,MT_HOME_W-44,t->accent_ink);
     }
 }
 static void draw_footer(App*a) {
     Theme*t=&a->theme;
     fill(a,0,437,640,43,t->bg);
     fill(a,18,437,604,1,t->outline);
-    const char *hint=a->page==HOME?"LEFT/RIGHT Category  UP/DOWN Videos  A Details  X Refresh  LB/RB Tabs":
-     a->page==SEARCH?"D-PAD Keyboard    A Type    START Search    L/R Tabs":
-     a->page==SAVED?"UP/DOWN  Select     A  Open     LB/RB  Tabs":
-     a->page==RADIO?"A Built-in Radio  START BG   SELECT Stop    B Back":
-     a->page==RADIO_NOW?"UP/DOWN Select Mix  LEFT/RIGHT Adjust  START Games  SELECT Stop":
-     a->page==STYLE?(a->radio_mix_edit?"LEFT/RIGHT Radio +/-5%  SELECT Done  START In-Game":"A Theme  SELECT Radio  START In-Game  X Cache  Y History"):
-     a->page==ABOUT?"Hold UP/DOWN Scroll   LEFT/RIGHT Page   X/Y Sections   B Home":
-     a->page==RESULTS?(a->more_available?"UP/DOWN Browse    A Details    X More    B Search":"UP/DOWN Browse    A Details    B Search"):
-     "A Play    B Back    Y Quality    MENU + START Return";
-    print_text(a,FS_11,hint,20,451,t->muted);
-    print_text(a,FS_11,"v0.9.11b2.2.6a",530,452,t->secondary);
+    const char *action=a->page==HOME?"A  Details    X  Refresh    UP/DOWN  Videos":
+     a->page==SEARCH?"D-PAD  Keyboard    A  Type    START  Search":
+     a->page==SAVED?"A  Open selected    UP/DOWN  Choose":
+     a->page==RADIO?"A  Listen    START  Background    SELECT  Stop":
+     a->page==RADIO_NOW?"UP/DOWN  Select mix    LEFT/RIGHT  Adjust":
+     a->page==STYLE?"A  Theme   START  Hotkeys   X Cache   Y History":
+     a->page==UPDATES?"A  Select    UP/DOWN  Options    B  Back":
+     a->page==ABOUT?"UP/DOWN  Scroll    X/Y  Sections    B  Home":
+     a->page==RESULTS?(a->more_available?"A  Details    X  More results    B  Search":"A  Details    B  Search"):
+     "A  Play    Y  Quality    B  Back";
+    const char *navigation=a->page==HOME?"LEFT/RIGHT  Category    LB/RB  Pages":
+     a->page==RADIO_NOW?"START  Games    SELECT  Stop    LB/RB  Pages":
+     a->page==ABOUT?"LEFT/RIGHT  Page    LB/RB  Tabs":
+     a->page==UPDATES?"Settings > SELECT  Updates":
+     a->page==PLAYER?"MENU + START  Return from Wasabi":
+     "LB/RB  Pages    B  Back";
+    print_ellipsis(a,FS_11,action,20,443,490,t->text);
+    print_ellipsis(a,FS_11,navigation,20,460,490,t->muted);
+    print_text(a,FS_11,MT_FOOTER,530,453,t->secondary);
 }
 static void render(App*a) {
-    draw_background(a);draw_header(a);
+    draw_background(a);
+    if(a->page==EXTRA){draw_extra(a);return;}
+    draw_header(a);draw_home_sidebar(a);
     switch(a->page){case HOME:draw_home(a);break;case SEARCH:draw_search(a);break;
     case SAVED:draw_saved(a);break;case RADIO:draw_radio(a);break;case RADIO_NOW:draw_radio_now(a);break;
-    case STYLE:draw_style(a);break;case ABOUT:draw_about(a);break;
+    case STYLE:draw_style(a);break;case ABOUT:draw_about(a);break;case UPDATES:draw_updates(a);break;case EXTRA:break;
     case PLAYER:draw_player(a);break;case RESULTS:draw_results(a);break;}
     draw_footer(a);
 }
@@ -1766,14 +1982,14 @@ static void set_page(App*a,Page p) {
     if(a->page==HOME && p!=HOME)stop_home_worker(a);
     if(a->page==RESULTS && p!=RESULTS)stop_result_thumb_worker(a);
     if(a->page==RADIO && p!=RADIO){stop_radio_worker(a);stop_radio_logo_worker(a);drop_radio_logos(a);}
-    if(a->page==STYLE && p!=STYLE)a->radio_mix_edit=false;
     if(p!=PLAYER && p!=RESULTS){stop_prefetch(a);a->awaiting_stream=false;}
     a->page=p;a->dirty=true;
     if(p==HOME){load_home_file(a);if(a->home_worker_pid==0)start_home_refresh(a,false);}
     if(p==RESULTS)start_result_thumb_worker(a,true);
     if(p==RADIO)radio_open(a);
     if(p==RADIO_NOW)radio_now_load(a);
-    if(p==STYLE)radio_mix_load(a);
+    if(p==STYLE){a->style_idx=a->theme_id;radio_mix_load(a);}
+    if(p==UPDATES){update_read_status(a);a->update_last_poll=0;}
 }
 /* Entering the Radio tab resumes the active native player.  B from Now
  * Playing deliberately calls set_page(RADIO), retaining access to the
@@ -1791,6 +2007,8 @@ static void cycle_page(App*a,int step) {
         open_nav_tab(a,(Page)p);return;
     }
     if(a->page==PLAYER || a->page==RESULTS)set_page(a,a->from_page);
+    if(a->page==UPDATES)set_page(a,STYLE);
+    if(a->page==EXTRA)set_page(a,ABOUT);
     int p=((int)a->page+step+NAV_TAB_COUNT)%NAV_TAB_COUNT;
     open_nav_tab(a,(Page)p);
 }
@@ -1851,6 +2069,8 @@ static void keyboard_activate(App*a) {
 static void navigate(App*a,int dx,int dy) {
     if(a->page==ABOUT){
         about_scroll_by(a,dx?dx*ABOUT_VISIBLE:dy);
+    }else if(a->page==UPDATES){
+        if(dy || dx)a->update_selected=(a->update_selected+dy+dx+12)%4;
     }
     else if(a->page==HOME){
         if(dx)home_set_category(a,(a->home_category+dx+HOME_CATEGORIES)%HOME_CATEGORIES);
@@ -1873,7 +2093,12 @@ static void navigate(App*a,int dx,int dy) {
         a->result_idx=(a->result_idx+dy+dx+n*3)%n;
         if(first!=(a->result_idx/RESULTS_VISIBLE)*RESULTS_VISIBLE)start_result_thumb_worker(a,true);
     }}
-    else if(a->page==STYLE){a->style_idx=(a->style_idx+dx+dy+TCOUNT*3)%TCOUNT;}
+    else if(a->page==STYLE){
+        int col=a->style_idx%2,row=a->style_idx/2;
+        if(dx)col=(col+dx+2)%2;
+        if(dy)row=(row+dy+2)%2;
+        a->style_idx=row*2+col;
+    }
     else if(a->page==SEARCH){
         int k=a->keyboard_idx;
         if(k<36){int x=k%9,y=k/9;x=(x+dx+9)%9;y+=dy;if(y<0)y=4;if(y>4)y=0;
@@ -1890,7 +2115,7 @@ static void activate(App*a) {
     else if(a->page==RADIO){
         if(a->radio_mode==0 && a->country_count>0){
             snprintf(a->radio_selected_country,sizeof(a->radio_selected_country),"%s",a->countries[a->country_idx].code);
-            a->radio_mode=1;a->station_count=0;a->station_idx=0;stop_radio_logo_worker(a);drop_radio_logos(a);radio_refresh(a,false,0);
+            a->radio_mode=1;a->station_count=0;a->station_idx=0;a->radio_next_offset=0;a->radio_has_more=true;stop_radio_logo_worker(a);drop_radio_logos(a);radio_refresh(a,false,0);
         }else if(a->radio_mode==1 && a->station_count>0){
             if(!radio_start_native_station(a,&a->stations[a->station_idx]))snprintf(a->radio_status,sizeof(a->radio_status),"Station address unavailable.");
         }else if(a->radio_mode==2 && a->favourite_count>0){
@@ -1898,7 +2123,8 @@ static void activate(App*a) {
         }
     }
     else if(a->page==RADIO_NOW)radio_now_reconnect(a,false);
-    else if(a->page==STYLE && !a->radio_mix_edit){if(read_theme(a,a->style_idx))save_settings(a);}
+    else if(a->page==STYLE){if(read_theme(a,a->style_idx))save_settings(a);}
+    else if(a->page==UPDATES)activate_updates(a);
     else if(a->page==SEARCH)keyboard_activate(a);
     else if(a->page==RESULTS){
         if(a->result_count>0){
@@ -1936,8 +2162,9 @@ static void activate(App*a) {
     }
 }
 static void back(App*a) {
-    if(a->page==STYLE && a->radio_mix_edit){a->radio_mix_edit=false;a->dirty=true;}
-    else if(a->page==PLAYER){
+    if(a->page==EXTRA){set_page(a,ABOUT);return;}
+    if(a->page==UPDATES){set_page(a,STYLE);return;}
+    if(a->page==PLAYER){
         stop_prefetch(a);a->awaiting_stream=false;
         if(a->current_is_youtube){write_data_file(a,"selected.txt","");drop_thumbnail(a);}
         set_page(a,a->from_page);
@@ -1952,9 +2179,8 @@ static void radio_x(App*a){
     if(a->radio_loading)return;
     if(a->radio_mode==0)radio_refresh(a,true,0);
     else if(a->radio_mode==1){
-        int offset=((a->station_count+19)/20)*20;
-        if(offset>=RADIO_MAX_STATIONS){snprintf(a->radio_status,sizeof(a->radio_status),"Reached 80 station limit.");a->dirty=true;}
-        else radio_refresh(a,false,(offset/20)*20);
+        if(!a->radio_has_more){snprintf(a->radio_status,sizeof(a->radio_status),"All available stations loaded.");a->dirty=true;}
+        else radio_refresh(a,false,a->radio_next_offset);
     }
 }
 static void radio_y(App*a){
@@ -1962,7 +2188,19 @@ static void radio_y(App*a){
     if(a->radio_mode==1&&a->station_count>0)radio_toggle_favourite(a,&a->stations[a->station_idx]);
     else if(a->radio_mode==2&&a->favourite_count>0)radio_toggle_favourite(a,&a->favourites[a->favourite_idx]);
 }
+static void feed_note(App*a,int button){
+    if(a->page!=ABOUT)return;
+    static const int keys[]={1,1,2,2,3};
+    if(button==keys[a->note_pos])a->note_pos++;
+    else a->note_pos=button==keys[0]?1:0;
+    if(a->note_pos==5){a->note_pos=0;set_page(a,EXTRA);}
+}
 static void keydown(App*a,SDL_Keycode key) {
+    if(a->page==ABOUT){
+        int keycode=(key==SDLK_UP)?1:(key==SDLK_DOWN)?2:(key==SDLK_RETURN||key==SDLK_KP_ENTER)?3:0;
+        feed_note(a,keycode);
+        if(a->page==EXTRA)return;
+    }
     switch(key){
       case SDLK_UP:if(a->page==RADIO_NOW){a->radio_now_slider=0;a->dirty=true;}else navigate(a,0,-1);break;
       case SDLK_DOWN:if(a->page==RADIO_NOW){a->radio_now_slider=1;a->dirty=true;}else navigate(a,0,1);break;
@@ -1970,21 +2208,16 @@ static void keydown(App*a,SDL_Keycode key) {
           bool ok=a->radio_now_slider?game_mix_adjust(a,-1):radio_mix_adjust(a,-1);
           if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
           a->dirty=true;
-        }else if(a->page==STYLE && a->radio_mix_edit){
-          if(!radio_mix_adjust(a,-1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
-          a->dirty=true;
         }else navigate(a,-1,0);break;
       case SDLK_RIGHT:if(a->page==RADIO_NOW){
           bool ok=a->radio_now_slider?game_mix_adjust(a,1):radio_mix_adjust(a,1);
           if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
           a->dirty=true;
-        }else if(a->page==STYLE && a->radio_mix_edit){
-          if(!radio_mix_adjust(a,1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
-          a->dirty=true;
         }else navigate(a,1,0);break;
       case SDLK_ESCAPE:back(a);break;
       case SDLK_RETURN:case SDLK_KP_ENTER:if(a->page==SEARCH)submit_search(a);else activate(a);break;
       case SDLK_BACKSPACE:if(a->page==SEARCH)remove_char(a);else back(a);break;
+      case SDLK_u:if(a->page==STYLE)open_updates(a);break;
       case SDLK_TAB:cycle_page(a,1);break;
       case SDLK_PAGEUP:case SDLK_LEFTBRACKET:cycle_page(a,-1);break;
       case SDLK_PAGEDOWN:case SDLK_RIGHTBRACKET:cycle_page(a,1);break;
@@ -1997,7 +2230,6 @@ static void keydown(App*a,SDL_Keycode key) {
         else if(a->page==RESULTS)request_more_results(a);
         else if(a->page==STYLE)request_clear_cache(a);
         break;
-      case SDLK_v:if(a->page==STYLE){a->radio_mix_edit=!a->radio_mix_edit;a->dirty=true;}break;
       case SDLK_h:if(a->page==STYLE && !radio_hotkeys_toggle(a)){
           snprintf(a->status_message,sizeof(a->status_message),"Unable to save in-game hotkeys setting.");a->dirty=true;
         }break;
@@ -2025,6 +2257,12 @@ static SDL_GameController* find_pad(void) {
     return NULL;
 }
 static void on_button(App*a,Uint8 button) {
+    if(a->page==ABOUT){
+        int c=button==SDL_CONTROLLER_BUTTON_DPAD_UP?1:button==SDL_CONTROLLER_BUTTON_DPAD_DOWN?2:
+            button==SDL_CONTROLLER_BUTTON_A?3:0;
+        feed_note(a,c);
+        if(a->page==EXTRA)return;
+    }
     if((a->page==RADIO || a->page==ABOUT) &&
        (button==SDL_CONTROLLER_BUTTON_DPAD_UP || button==SDL_CONTROLLER_BUTTON_DPAD_DOWN)){
         a->nav_repeat_dir=button==SDL_CONTROLLER_BUTTON_DPAD_UP?-1:1;
@@ -2037,16 +2275,10 @@ static void on_button(App*a,Uint8 button) {
           bool ok=a->radio_now_slider?game_mix_adjust(a,-1):radio_mix_adjust(a,-1);
           if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
           a->dirty=true;
-        }else if(a->page==STYLE && a->radio_mix_edit){
-          if(!radio_mix_adjust(a,-1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
-          a->dirty=true;
         }else navigate(a,-1,0);break;
       case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:if(a->page==RADIO_NOW){
           bool ok=a->radio_now_slider?game_mix_adjust(a,1):radio_mix_adjust(a,1);
           if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
-          a->dirty=true;
-        }else if(a->page==STYLE && a->radio_mix_edit){
-          if(!radio_mix_adjust(a,1))snprintf(a->status_message,sizeof(a->status_message),"Radio mix unavailable; volume not changed.");
           a->dirty=true;
         }else navigate(a,1,0);break;
       case SDL_CONTROLLER_BUTTON_A:activate(a);break;
@@ -2069,31 +2301,48 @@ static void on_button(App*a,Uint8 button) {
             if(!radio_hotkeys_toggle(a))snprintf(a->status_message,sizeof(a->status_message),"Unable to save in-game hotkeys setting.");
             a->dirty=true;
         }else if(a->page==SEARCH)submit_search(a);else set_page(a,HOME);break;
-      case SDL_CONTROLLER_BUTTON_BACK:if(a->page==RADIO || a->page==RADIO_NOW)radio_stop_background(a);
-        else if(a->page==STYLE){a->radio_mix_edit=!a->radio_mix_edit;a->dirty=true;}break;
+      case SDL_CONTROLLER_BUTTON_BACK:
+        if(a->page==STYLE)open_updates(a);
+        else if(a->page==RADIO || a->page==RADIO_NOW)radio_stop_background(a);
+        break;
       case SDL_CONTROLLER_BUTTON_Y:if(a->page==RADIO_NOW)radio_now_reconnect(a,true);
         else if(a->page==ABOUT)about_jump_section(a,-1);else if(a->page==STYLE)request_clear_history(a);else if(a->page==RADIO)radio_y(a);else if(a->page==HOME)home_set_category(a,(a->home_category+1)%HOME_CATEGORIES);else if(a->page==PLAYER)toggle_quality(a);else set_page(a,STYLE);break;
       default:break;
     }
 }
 static void mouse_down(App*a,int x,int y){
-    if(a->page==RADIO_NOW && x>=39 && x<=601 &&
-       ((y>=310 && y<=332)||(y>=358 && y<=380))){
-        bool game=(y>=358);a->radio_now_slider=game?1:0;
-        int level=((x-39)*100+281)/562;
+    if(a->page==RADIO_NOW && x>=MT_HOME_X+15 && x<=MT_HOME_X+MT_HOME_W-15 &&
+       ((y>=292 && y<=310)||(y>=342 && y<=360))){
+        bool game=(y>=342);a->radio_now_slider=game?1:0;
+        int level=((x-(MT_HOME_X+15))*100+(MT_HOME_W-30)/2)/(MT_HOME_W-30);
         level=((level+2)/5)*5;
         if(level>100)level=100;
         bool ok=game?game_mix_set(a,level):radio_mix_set(a,level);
         if(!ok)snprintf(a->radio_now_notice,sizeof(a->radio_now_notice),"Selected volume update unavailable.");
         a->dirty=true;return;
     }
-    if(y>=18&&y<=55&&x>=279&&x<622){int tab=(x-279)/57;if(tab<NAV_TAB_COUNT)open_nav_tab(a,(Page)tab);return;}
-    if(a->page==HOME&&y>=128&&y<155&&x>=20&&x<622){
-        int cat=(x-20)/101;if(cat<HOME_CATEGORIES)home_set_category(a,cat);
-    }else if(a->page==HOME&&y>=163&&y<419){
-        int pick=(y-163)/64;
-        if(pick<a->home_count){a->home_idx=pick;activate(a);}
-    }else if(a->page==RADIO&&y>=RADIO_LIST_Y&&y<RADIO_LIST_Y+RADIO_ROW_H*RADIO_VISIBLE){
+    if(x>=MT_SIDE_X+6 && x<MT_SIDE_X+MT_SIDE_W-6 &&
+       y>=MT_SIDE_ROW_Y && y<MT_SIDE_ROW_Y+MT_SIDE_ROW_STEP*NAV_TAB_COUNT){
+        int tab=(y-MT_SIDE_ROW_Y)/MT_SIDE_ROW_STEP;
+        if(tab<NAV_TAB_COUNT && (y-MT_SIDE_ROW_Y)%MT_SIDE_ROW_STEP<38)open_nav_tab(a,(Page)tab);
+        return;
+    }
+    if(a->page==HOME && x>=MT_HOME_X && x<MT_HOME_X+MT_HOME_W &&
+       y>=MT_HOME_CATEGORY_Y && y<MT_HOME_CATEGORY_Y+26){
+        int cat=(x-MT_HOME_X)/80;
+        if(cat<HOME_CATEGORIES && (x-MT_HOME_X)%80<MT_HOME_CATEGORY_W)home_set_category(a,cat);
+    }else if(a->page==HOME&&x>=MT_HOME_X&&x<MT_HOME_X+MT_HOME_W){
+        int pick=-1;
+        if(y>=MT_HOME_CARD_Y){
+            int offset=y-MT_HOME_CARD_Y,slot=offset/MT_HOME_CARD_STEP;
+            if(slot>=0&&slot<HOME_VIDEOS&&offset%MT_HOME_CARD_STEP<MT_HOME_CARD_H)pick=slot;
+        }
+        if(pick>=0&&pick<a->home_count){a->home_idx=pick;activate(a);}
+    }else if(a->page==STYLE && x>=MT_HOME_X+246 && y>=320 && y<341){open_updates(a);}
+    else if(a->page==UPDATES && x>=MT_HOME_X && x<MT_HOME_X+MT_HOME_W && y>=250 && y<410){
+        int row=(y-250)/41;
+        if((y-250)%41<37 && row<4){a->update_selected=row;activate(a);}
+    }else if(a->page==RADIO&&x>=MT_HOME_X&&y>=RADIO_LIST_Y&&y<RADIO_LIST_Y+RADIO_ROW_H*RADIO_VISIBLE){
         int pos=(y-RADIO_LIST_Y)/RADIO_ROW_H,first=0;
         if(a->radio_mode==0)first=(a->country_idx/RADIO_VISIBLE)*RADIO_VISIBLE;
         else if(a->radio_mode==1)first=(a->station_idx/RADIO_VISIBLE)*RADIO_VISIBLE;
@@ -2102,19 +2351,24 @@ static void mouse_down(App*a,int x,int y){
         if(a->radio_mode==0 && chosen<a->country_count){a->country_idx=chosen;activate(a);}
         else if(a->radio_mode==1 && chosen<a->station_count){a->station_idx=chosen;activate(a);}
         else if(a->radio_mode==2 && chosen<a->favourite_count){a->favourite_idx=chosen;activate(a);}
-    }else if(a->page==ABOUT && y>=159&&y<412){
+    }else if(a->page==ABOUT && x>=MT_HOME_X&&y>=160&&y<412){
         about_scroll_by(a,y<285?-ABOUT_VISIBLE:ABOUT_VISIBLE);
-    }else if(a->page==STYLE&&y>=161&&y<315){int id=(x-19)/206;
-        if(id>=0&&id<TCOUNT){a->style_idx=id;activate(a);}}
+    }else if(a->page==STYLE&&x>=MT_HOME_X&&x<MT_HOME_X+MT_HOME_W&&y>=161&&y<313){
+        int col=(x-MT_HOME_X)/244,row=(y-161)/80;
+        if(col<2&&row<2&&(x-MT_HOME_X)%244<233&&(y-161)%80<72){
+            a->style_idx=row*2+col;activate(a);
+        }
+    }
     else if(a->page==SEARCH){
-        if(y>=227&&y<381&&x>=25&&x<619){int col=(x-25)/66,row=(y-227)/40;
-            if(col<9&&row<4){a->keyboard_idx=row*9+col;keyboard_activate(a);}}
-        else if(y>=391&&y<425&&x>=25&&x<620){int col=(x-25)/199;
-            if(col<3){a->keyboard_idx=36+col;keyboard_activate(a);}}
-    }else if(a->page==SAVED&&y>=260&&y<360){a->saved_idx=(y-260)/54;activate(a);}
-    else if(a->page==RESULTS&&y>=154&&y<426){
-        int base=(a->result_idx/4)*4;int pos=base+(y-154)/68;
-        if(pos<a->result_count){a->result_idx=pos;activate(a);}}
+        if(y>=219&&y<373&&x>=149&&x<608){int col=(x-149)/51,row=(y-219)/40;
+            if(col<9&&row<4&&(x-149)%51<45&&(y-219)%40<34){a->keyboard_idx=row*9+col;keyboard_activate(a);}}
+        else if(y>=384&&y<419&&x>=149&&x<609){int col=(x-149)/156;
+            if(col<3&&(x-149)%156<148){a->keyboard_idx=36+col;keyboard_activate(a);}}
+    }else if(a->page==SAVED&&x>=MT_HOME_X+14&&y>=266&&y<367){a->saved_idx=(y-266)/55;activate(a);}
+    else if(a->page==RESULTS&&x>=MT_HOME_X&&y>=174&&y<410){
+        int offset=y-174,base=(a->result_idx/RESULTS_VISIBLE)*RESULTS_VISIBLE;
+        int pos=base+offset/59;
+        if(offset%59<MT_HOME_CARD_H&&pos<a->result_count){a->result_idx=pos;activate(a);}}
     else if(a->page==PLAYER)activate(a);
     a->dirty=true;
 }
@@ -2157,7 +2411,8 @@ static void shutdown_app(App*a) {
     if(a->radio_flag_atlas)SDL_DestroyTexture(a->radio_flag_atlas);
     clear_cache(a);
     drop_home_thumbnails(a);
-    if(a->background_texture)SDL_DestroyTexture(a->background_texture);
+    if(a->brand_icon)SDL_DestroyTexture(a->brand_icon);
+    if(a->brand_icon_paper)SDL_DestroyTexture(a->brand_icon_paper);
     drop_thumbnail(a);
     if(a->pad)SDL_GameControllerClose(a->pad);
     for(int i=0;i<FS_COUNT;i++)if(a->fonts[i])TTF_CloseFont(a->fonts[i]);
@@ -2179,16 +2434,17 @@ static bool screenshot(App*a,const char*filename) {
 int main(int argc,char**argv) {
     const char*requested_assets=NULL,*screenfile=NULL;
     int force_theme=-1;
-    bool handoff=false, resume_player=false, show_results=false, show_style=false, show_about=false, show_radio=false, show_radio_now=false;
+    bool handoff=false, resume_player=false, show_results=false, show_style=false, show_updates=false, show_about=false, show_radio=false, show_radio_now=false;
     int handoff_kind=0;
     for(int i=1;i<argc;i++) {
-        if(!strcmp(argv[i],"--version")){puts("MustardTube 0.9.11 Beta 2.2.6a DualMixer StaleSession UI Fix (Andromeda ARM64)");return 0;}
+        if(!strcmp(argv[i],"--version")){puts("MustardTube " MT_RELEASE " (Andromeda ARM64)");return 0;}
         if(!strcmp(argv[i],"--self-test")){
-            if(strlen(keyboard_chars)!=36||HOME_VIDEOS!=4||HOME_CATEGORIES!=6||TCOUNT!=3||NAV_TAB_COUNT!=6){fputs("Self-test FAIL\n",stderr);return 1;}
-            if(SEARCH_RESULTS!=40){fputs("Self-test FAIL: result cap\n",stderr);return 1;}
-            puts("MustardTube 0.9.11 Beta 2.1 self-test PASS: 6 tabs, 6 Home categories, 4 visible Search thumbnails, 40 result cap, 3 themes");return 0;
+            if(strlen(keyboard_chars)!=36||HOME_VIDEOS!=4||HOME_CATEGORIES!=6||TCOUNT!=4||NAV_TAB_COUNT!=6){fputs("Self-test FAIL\n",stderr);return 1;}
+            if(SEARCH_RESULTS!=120){fputs("Self-test FAIL: result cap\n",stderr);return 1;}
+            puts("MustardTube " MT_RELEASE " self-test PASS: 6 tabs, 6 Home categories, 4 visible thumbnails, 120 search results, 4 themes");return 0;
         }
         if(!strcmp(argv[i],"--show-style"))show_style=true;
+        else if(!strcmp(argv[i],"--show-updates"))show_updates=true;
         else if(!strcmp(argv[i],"--show-about"))show_about=true;
         else if(!strcmp(argv[i],"--show-radio"))show_radio=true;
         else if(!strcmp(argv[i],"--show-radio-now"))show_radio_now=true;
@@ -2198,11 +2454,11 @@ int main(int argc,char**argv) {
         else if(!strcmp(argv[i],"--screenshot")&&i+1<argc)screenfile=argv[++i];
         else if(!strcmp(argv[i],"--theme")&&i+1<argc){const char*t=argv[++i];for(int n=0;n<TCOUNT;n++)if(!strcmp(t,theme_files[n]))force_theme=n;}
         else if(!strcmp(argv[i],"--help")){
-            puts("Usage: mustardtube [--version|--self-test|--assets DIR|--show-radio|--show-results|--show-about|--resume-player|--theme midnight|forest|paper|--screenshot FILE.bmp]");return 0;
+            puts("Usage: mustardtube [--version|--self-test|--assets DIR|--show-radio|--show-results|--show-about|--show-updates|--resume-player|--theme midnight|forest|paper|acidbloom|--screenshot FILE.bmp]");return 0;
         }
     }
     App*a=(App*)calloc(1,sizeof(App));if(!a){fputs("Out of memory\n",stderr);return 1;}
-    a->running=true;a->dirty=true;a->page=show_about?ABOUT:show_radio_now?RADIO_NOW:show_radio?RADIO:show_style?STYLE:resume_player?PLAYER:show_results?RESULTS:HOME;
+    a->running=true;a->dirty=true;a->page=show_about?ABOUT:show_radio_now?RADIO_NOW:show_radio?RADIO:show_updates?UPDATES:show_style?STYLE:resume_player?PLAYER:show_results?RESULTS:HOME;
     a->from_page=resume_player?RESULTS:HOME;
     int rc=1;
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_EVENTS)!=0){fprintf(stderr,"SDL init: %s\n",SDL_GetError());goto early;}
@@ -2211,10 +2467,11 @@ int main(int argc,char**argv) {
     if(!discover_assets(a,requested_assets)){
         fputs("Missing assets/themes/midnight.theme. Run from project root or use --assets PATH\n",stderr);goto done;}
     load_settings(a);init_data_dir(a);radio_mix_load(a);game_mix_load(a);radio_hotkeys_load(a);a->quality=360;
+    if(show_updates){update_read_channel(a);update_read_status(a);}
     char quality_path[PATH_MAX];
     if(snprintf(quality_path,sizeof(quality_path),"%s/quality.txt",a->data_dir)<(int)sizeof(quality_path)){
         FILE*f=fopen(quality_path,"r");int q=0;
-        if(f){if(fscanf(f,"%d",&q)==1 && (q==480 || q==720))a->quality=q;fclose(f);}
+        if(f){if(fscanf(f,"%d",&q)==1 && (q==480 || q==720 || q==1080))a->quality=q;fclose(f);}
     }
     /* Search runs in a separate process. Restore the query when returning to Search. */
     if(a->data_dir[0]) {
@@ -2248,7 +2505,7 @@ int main(int argc,char**argv) {
         screen_w=display_mode.w; screen_h=display_mode.h;
     }
     if(screen_w!=W || screen_h!=H){
-        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.2.6a EXP",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
+        a->win=SDL_CreateWindow("MustardTube v" MT_RELEASE,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
              screen_w,screen_h,SDL_WINDOW_SHOWN|SDL_WINDOW_FULLSCREEN_DESKTOP);
         if(!a->win){
             fprintf(stderr,"Native fullscreen unavailable (%dx%d): %s; falling back to 640x480\n",
@@ -2256,7 +2513,7 @@ int main(int argc,char**argv) {
         }
     }
     if(!a->win){
-        a->win=SDL_CreateWindow("MustardTube v0.9.11 Beta 2.2.6a EXP",SDL_WINDOWPOS_CENTERED,
+        a->win=SDL_CreateWindow("MustardTube v" MT_RELEASE,SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED,W,H,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE);
     }
     if(!a->win){fprintf(stderr,"Window: %s\n",SDL_GetError());goto done;}
@@ -2265,6 +2522,9 @@ int main(int argc,char**argv) {
     MTViewport view=mt_viewport(actual_w,actual_h,W,H);
     fprintf(stderr,"MustardTube display: detected %dx%d; window %dx%d; logical %dx%d; viewport %d,%d %dx%d\n",
         screen_w,screen_h,actual_w,actual_h,W,H,view.x,view.y,view.w,view.h);
+    /* Bilinear scaling improves the 45px logo and bounded 4-thumbnail cards;
+     * no additional textures or upload passes. */
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"linear");
     a->r=SDL_CreateRenderer(a->win,-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
     if(!a->r)a->r=SDL_CreateRenderer(a->win,-1,SDL_RENDERER_SOFTWARE);
     if(!a->r){fprintf(stderr,"Renderer: %s\n",SDL_GetError());goto done;}
@@ -2298,12 +2558,15 @@ int main(int argc,char**argv) {
                      (time(NULL)-a->preview_started)<6;
         SDL_Event e;
         int received;
-        if(a->page==RADIO_NOW)received=SDL_WaitEventTimeout(&e,1000);
+        if(a->page==RADIO_NOW || a->page==UPDATES)received=SDL_WaitEventTimeout(&e,1000);
         else received=(a->awaiting_stream || preview || a->page==HOME ||
             (a->page==RESULTS && a->result_thumb_pid>0) ||
             (a->page==RADIO && (a->radio_loading || a->radio_logo_pid>0)) ||
             ((a->page==RADIO || a->page==ABOUT) && a->nav_repeat_dir))?SDL_WaitEventTimeout(&e,60):SDL_WaitEvent(&e);
         if(received){handle_event(a,&e);while(SDL_PollEvent(&e))handle_event(a,&e);}
+        if(a->page==UPDATES && SDL_GetTicks()-a->update_last_poll>=1000){
+            a->update_last_poll=SDL_GetTicks();update_read_status(a);
+        }
         if(a->page==RADIO_NOW){
             Uint32 tick=SDL_GetTicks();
             if((Uint32)(tick-a->radio_now_last_tick)>=1000){
@@ -2368,11 +2631,14 @@ done:
     if(a->request_more)handoff_kind=YT_MORE_EXIT;
     if(a->request_clear)handoff_kind=CLEAR_CACHE_EXIT;
     if(a->request_clear_history)handoff_kind=CLEAR_HISTORY_EXIT;
+    if(a->request_update_check)handoff_kind=UPDATE_CHECK_EXIT;
+    if(a->request_update_download)handoff_kind=UPDATE_DOWNLOAD_EXIT;
     SDL_StopTextInput();
     shutdown_app(a); /* Always release video/input before the supervisor opens Wasabi. */
 early:
+    free(a->stations);
     free(a);
     /* Special exit code requests stock Wasabi from our shell supervisor.
        The supervisor waits and starts MustardTube again after Wasabi quits. */
-    return (handoff_kind==YT_SEARCH_EXIT || handoff_kind==YT_MORE_EXIT || handoff_kind==CLEAR_CACHE_EXIT || handoff_kind==CLEAR_HISTORY_EXIT) ? handoff_kind : handoff ? handoff_kind : rc;
+    return (handoff_kind==YT_SEARCH_EXIT || handoff_kind==YT_MORE_EXIT || handoff_kind==CLEAR_CACHE_EXIT || handoff_kind==CLEAR_HISTORY_EXIT || handoff_kind==UPDATE_CHECK_EXIT || handoff_kind==UPDATE_DOWNLOAD_EXIT) ? handoff_kind : handoff ? handoff_kind : rc;
 }

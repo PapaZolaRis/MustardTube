@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
 # MustardTube v0.9.9. Node-first; experimental real H.264 HLS 720p for live and recorded videos.
 set -eu
 APP_DIR="${MUSTARDTUBE_APP_DIR:-/run/muos/storage/application/MustardTube}"
@@ -42,6 +43,12 @@ maintain_cache() {
     done
     rm -f "$CACHE_DIR"/resolve-*.tmp "$CACHE_DIR"/resolve-*.meta "$CACHE_DIR"/slot-*.tmp.* "$CACHE_DIR"/live-hls.tmp.* "$CACHE_DIR"/live-ready.tmp.*
     # Expired signed HLS manifests must not be retained indefinitely.
+    rm -f "$CACHE_DIR"/direct-live.tmp.*
+    if [ -f "$CACHE_DIR/direct-live" ]; then
+        live_expiry=$(sed -n '3p' "$CACHE_DIR/direct-live")
+        case "$live_expiry" in ''|*[!0-9]*) live_expiry=0;; esac
+        [ "$live_expiry" -gt "$(date +%s)" ] || rm -f "$CACHE_DIR/direct-live"
+    fi
     if [ -f "$CACHE_DIR/live-ready" ]; then
         old_live_until=$(sed -n '3p' "$CACHE_DIR/live-ready" 2>/dev/null || true)
         case "$old_live_until" in ''|*[!0-9]*) old_live_until=0;; esac
@@ -66,8 +73,8 @@ maintain_cache() {
 }
 maintain_cache
 BATCH=8
-MAX_RESULTS=40
-MAX_SCAN=200
+MAX_RESULTS=120
+MAX_SCAN=400
 STREAM_TTL=300
 LIVE_TTL=45 # only long enough for preview -> Wasabi handoff, never ordinary 5-minute caching
 seconds() { date +%s; }
@@ -82,7 +89,7 @@ read_selection() {
     id=$(sed -n '1p' "$DATA/selected.txt" 2>/dev/null || true)
     valid_id "$id" || { status 'Choose a video first.'; return 1; }
     quality=$(cat "$DATA/quality.txt" 2>/dev/null || true)
-    case "$quality" in 480|720) ;; *) quality=360;; esac
+    case "$quality" in 480|720|1080) ;; *) quality=360;; esac
 }
 # 60s backend watchdog: hardware testing resolved a stream in 41s at 1.8 GHz.
 # The UI waits longer (66s) so it never cancels a still-valid backend attempt.
@@ -92,7 +99,7 @@ run_resolver() {
     # Keep the proven 360p/480p extraction arguments unchanged.
     # Only HD needs an extra (local-only) live_status print to distinguish
     # recorded two-track HLS from a live two-track HLS broadcast.
-    if [ "$quality" = 720 ]; then
+    if [ "$quality" -ge 720 ]; then
         set -- --print-to-file '%(live_status)s' "$meta"
     else
         set --
@@ -165,6 +172,11 @@ create_hls_manifest() {
         resolution=1280x720
         codecs='avc1.4D401F,mp4a.40.2'
         bandwidth=3300000
+        if [ "$quality" = 1080 ]; then
+            resolution=1920x1080
+            codecs=avc1.640028,mp4a.40.2
+            bandwidth=6500000
+        fi
     fi
     manifest="$CACHE_DIR/live-hls.tmp.$$"
     {
@@ -187,6 +199,17 @@ resolve_core() {
     slot=$(printf '%s:%s' "$id" "$quality" | cksum | awk '{print $1 % 4}')
     cache="$CACHE_DIR/slot-$slot"
     now=$(seconds)
+    if [ -f "$CACHE_DIR/direct-live" ]; then
+        {
+            read -r saved_id && read -r saved_quality && read -r until && read -r uri
+        } < "$CACHE_DIR/direct-live" || until=0
+        if [ "$id" = "$saved_id" ] && [ "$quality" = "$saved_quality" ] && [ "$until" -gt "$now" ]; then
+            stream_kind=live_direct
+            publish_stream
+            return 0
+        fi
+        rm -f "$CACHE_DIR/direct-live"
+    fi
     if playable_hls_cache; then
         uri="$CACHE_DIR/live-hls.m3u8"
         until="$live_until"
@@ -229,8 +252,8 @@ resolve_core() {
         # actual combined 720p source when offered; otherwise select exactly
         # one 720p HLS video track and one HLS audio track in a single request.
         # No silent 480p substitution in the HD mode.
-        hd_muxed='best[height=720][vcodec^=avc1][acodec!=none]'
-        hd_hls='bestvideo[protocol^=m3u8][height=720][vcodec^=avc1]+bestaudio[protocol^=m3u8]'
+        hd_muxed="best[height=$quality][vcodec^=avc1][acodec!=none]"
+        hd_hls="bestvideo[protocol^=m3u8][height=$quality][vcodec^=avc1]+bestaudio[protocol^=m3u8]"
         normal_fmt="$hd_muxed"
         live_fmt="$hd_hls"
     fi
@@ -243,6 +266,15 @@ resolve_core() {
         if [ "$lines" -eq 1 ]; then
             uri=$(sed -n '1p' "$tmp")
             case "$uri" in https://*|http://*)
+                if [ "$quality" -ge 720 ] && [ "$(cat "$meta" 2>/dev/null)" = is_live ]; then
+                    stream_kind=live_direct
+                    until=$(( $(seconds) + LIVE_TTL ))
+                    printf '%s\n' "$id" "$quality" "$until" "$uri" > "$CACHE_DIR/direct-live.tmp.$$"
+                    mv -f "$CACHE_DIR/direct-live.tmp.$$" "$CACHE_DIR/direct-live"
+                    publish_stream
+                    rm -f "$tmp" "$meta"
+                    return 0
+                fi
                 until=$(( $(seconds) + STREAM_TTL ))
                 expiry=$(printf '%s' "$uri" | sed -n 's/.*[?&]expire=\([0-9][0-9]*\).*/\1/p')
                 case "$expiry" in ''|*[!0-9]*) ;; *)
@@ -259,7 +291,7 @@ resolve_core() {
                 fi;;
             esac
         elif [ "$lines" -eq 2 ]; then
-            if [ "$quality" != 720 ]; then
+            if [ "$quality" -lt 720 ]; then
                 # Existing 360p/480p fallback path was live-only in v0.9.8.
                 hls_kind=live
             else
@@ -280,8 +312,8 @@ resolve_core() {
     fi
     rm -f "$tmp" "$meta" "$CACHE_DIR/live-hls.tmp.$$" "$CACHE_DIR/live-ready.tmp.$$"
     printf 'resolve outcome=failed duration=%ss quality=%s solver=%s\n' "$(( $(seconds)-start_time ))" "$quality" "$solver" >> "$DATA/timing.log"
-    if [ "$quality" = 720 ]; then
-        status 'HD 720p unavailable for this video. Press Y to switch quality.'
+    if [ "$quality" -ge 720 ]; then
+        status "HD ${quality}p unavailable for this video. Press Y to switch quality."
     else
         status 'Video or live stream unavailable. Press A to retry.'
     fi
@@ -294,7 +326,7 @@ publish_stream() {
     mv -f "$DATA/stream-kind.txt.tmp.$$" "$DATA/stream-kind.txt"
     printf '%s\n%s\n%s\n' "$id" "$until" "$quality" > "$DATA/prefetch-ready.txt.tmp.$$"
     mv -f "$DATA/prefetch-ready.txt.tmp.$$" "$DATA/prefetch-ready.txt"
-    if [ "$stream_kind" = live ]; then status 'Live stream ready.'; elif [ "$stream_kind" = vod_hls ]; then status 'Recorded HD 720p ready.'; else status 'Ready to play.'; fi
+    if [ "$stream_kind" = live ] || [ "$stream_kind" = live_direct ]; then status 'Live stream ready.'; elif [ "$stream_kind" = vod_hls ]; then status "Recorded HD ${quality}p ready."; else status 'Ready to play.'; fi
 }
 # Keep diagnostics coarse: never persist queries, full stderr, URLs or tokens.
 search_error_category() {
@@ -333,9 +365,9 @@ search_batch() {
     return 1
 }
 merge_results() {
-    awk '{m=index($0,"|||"); if(!m)next; id=substr($0,1,m-1);
+    awk -v cap="$MAX_RESULTS" '{m=index($0,"|||"); if(!m)next; id=substr($0,1,m-1);
       if(length(id)!=11 || id ~ /[^A-Za-z0-9_-]/ || seen[id]++)next;
-      if(++n<=40)print}' "$@" > "$merged"
+      if(++n<=cap)print}' "$@" > "$merged"
 }
 fetch_thumb() {
     [ "${MUSTARDTUBE_SKIP_THUMBNAILS:-0}" = 1 ] && return 0
@@ -378,6 +410,7 @@ cache_size_kib() {
         sum=$((sum + kb))
     done
     for path in "$DATA"/home-*-results.tsv "$DATA"/home-*-updated.txt "$DATA"/home-*-status.txt \
+                "$DATA"/home-*-pool.tsv "$DATA"/home-*-position.txt "$DATA"/home-*-scan.txt "$DATA"/home-*-query.txt \
                 "$DATA/home-results.tsv" "$DATA/home-updated.txt" \
                 "$DATA/search-results.tsv" "$DATA/cached-query.txt" \
                 "$DATA/cached-search-time.txt" "$DATA/search-raw.tmp" \
@@ -411,7 +444,7 @@ home|home-thumbs)
         home_status 'Loading real YouTube videos...'
         raw="$DATA/home-raw.tmp.$$"
         prepared="$out.tmp.$$"
-        trap 'rm -f "$raw" "$prepared"' EXIT HUP INT TERM
+        trap 'rm -f "$raw" "$prepared" "$prepared.pool" "$prepared.batch" "$prepared.merge"' EXIT HUP INT TERM
         started=$(seconds)
         # Search-based discovery; not official chart rankings or YouTube recommendations.
         case "$category" in
@@ -432,41 +465,86 @@ home|home-thumbs)
         esac
     fi
     if [ "$mode" = home ]; then
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 50 "$YTDLP" --ignore-config --no-progress --no-warnings \
-          --socket-timeout 12 --extractor-retries 1 --retries 1 \
-          --cache-dir "$YT_CACHE" --js-runtimes "$JS_RUNTIME" \
-          --flat-playlist --playlist-end 12 \
-          --print '%(id)s|||%(title)s|||%(channel)s|||%(duration_string)s' \
-          -- "ytsearch12:$discovery_query" > "$raw" 2>/dev/null || { home_status 'Unable to refresh; previous cards kept.'; exit 4; }
+    # Four cards remain visible. Successive Refresh presses cycle through a
+    # per-category discovery pool. Fetch 12 more IDs only when needed; do NOT
+    # query 100+ items or download 100 thumbnails on every Home refresh.
+    pool="$DATA/home-$category-pool.tsv"
+    pointer="$DATA/home-$category-position.txt"
+    scanfile="$DATA/home-$category-scan.txt"
+    queryfile="$DATA/home-$category-query.txt"
+    max_home_scan=600 # Safety bound well beyond 100; independent of visible cards.
+    saved_query=$(cat "$queryfile" 2>/dev/null || true)
+    position=$(cat "$pointer" 2>/dev/null || true)
+    scanned=$(cat "$scanfile" 2>/dev/null || true)
+    case "$position" in ''|*[!0-9]*) position=0;; esac
+    case "$scanned" in ''|*[!0-9]*) scanned=0;; esac
+    if [ "$saved_query" != "$discovery_query" ]; then
+        position=0;scanned=0
+        : > "$prepared.pool"
+    elif [ -f "$pool" ]; then
+        cp "$pool" "$prepared.pool"
     else
-        "$YTDLP" --ignore-config --no-progress --no-warnings \
-          --socket-timeout 12 --extractor-retries 1 --retries 1 \
-          --cache-dir "$YT_CACHE" --js-runtimes "$JS_RUNTIME" \
-          --flat-playlist --playlist-end 12 \
-          --print '%(id)s|||%(title)s|||%(channel)s|||%(duration_string)s' \
-          -- "ytsearch12:$discovery_query" > "$raw" 2>/dev/null || { home_status 'Unable to refresh; previous cards kept.'; exit 4; }
+        : > "$prepared.pool"
+        position=0;scanned=0
     fi
-    awk -F '[|][|][|]' '
-      NF >= 4 && length($1)==11 && $1 ~ /^[A-Za-z0-9_-]+$/ && $2!="" && $2!="NA" && !seen[$1]++ {
-        gsub(/[\r\n\t]/," ",$2);gsub(/[\r\n\t]/," ",$3);gsub(/[\r\n\t]/," ",$4);
-        title=substr($2,1,175);channel=substr($3,1,83);dur=substr($4,1,23);
-        if(channel=="" || channel=="NA")channel="YouTube";
-        if(dur=="NA")dur="";
-        printf "%s|||%s|||%s|||%s\n",$1,title,channel,dur;
-        if(++count==4)exit
-      }' "$raw" > "$prepared"
+    # One new search page per refresh, unless it contains only duplicate IDs.
+    # Bound retries to avoid long waits on a slow network.
+    tries=0
+    total=$(count_lines "$prepared.pool")
+    while [ "$position" -ge "$total" ] && [ "$scanned" -lt "$max_home_scan" ] && [ "$tries" -lt 3 ]; do
+        tries=$((tries+1))
+        from=$((scanned+1));to=$((scanned+12))
+        [ "$to" -le "$max_home_scan" ] || to=$max_home_scan
+        # yt-dlp skips older playlist entries instead of printing all past cards.
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 50 "$YTDLP" --ignore-config --no-progress --no-warnings \
+              --socket-timeout 12 --extractor-retries 1 --retries 1 \
+              --cache-dir "$YT_CACHE" --js-runtimes "$JS_RUNTIME" \
+              --flat-playlist --playlist-start "$from" --playlist-end "$to" \
+              --print '%(id)s|||%(title)s|||%(channel)s|||%(duration_string)s' \
+              -- "ytsearch${to}:$discovery_query" > "$raw" 2>/dev/null || { home_status 'Unable to refresh; previous cards kept.'; exit 4; }
+        else
+            "$YTDLP" --ignore-config --no-progress --no-warnings \
+              --socket-timeout 12 --extractor-retries 1 --retries 1 \
+              --cache-dir "$YT_CACHE" --js-runtimes "$JS_RUNTIME" \
+              --flat-playlist --playlist-start "$from" --playlist-end "$to" \
+              --print '%(id)s|||%(title)s|||%(channel)s|||%(duration_string)s' \
+              -- "ytsearch${to}:$discovery_query" > "$raw" 2>/dev/null || { home_status 'Unable to refresh; previous cards kept.'; exit 4; }
+        fi
+        raw_count=$(count_lines "$raw")
+        awk -F '[|][|][|]' '
+          NF >= 4 && length($1)==11 && $1 ~ /^[A-Za-z0-9_-]+$/ && $2!="" && $2!="NA" && !seen[$1]++ {
+            gsub(/[\r\n\t]/," ",$2);gsub(/[\r\n\t]/," ",$3);gsub(/[\r\n\t]/," ",$4);
+            title=substr($2,1,175);channel=substr($3,1,83);dur=substr($4,1,23);
+            if(channel=="" || channel=="NA")channel="YouTube";
+            if(dur=="NA")dur="";
+            printf "%s|||%s|||%s|||%s\n",$1,title,channel,dur;
+          }' "$raw" > "$prepared.batch"
+        awk -F '[|][|][|]' '!seen[$1]++' "$prepared.pool" "$prepared.batch" > "$prepared.merge"
+        mv -f "$prepared.merge" "$prepared.pool"
+        scanned=$to
+        total=$(count_lines "$prepared.pool")
+        # Fewer than requested entries indicates the search has ended.
+        if [ "$raw_count" -lt "$((to-from+1))" ]; then scanned=$max_home_scan;break;fi
+    done
+    # No more unique videos: preserve the last four rather than looping or
+    # showing fake duplicates.  A new search/category starts a new pool.
+    if [ "$position" -ge "$total" ]; then
+        home_status 'No additional discovery videos. Try another category.'
+        exit 0
+    fi
+    awk -v from="$((position+1))" -v to="$((position+4))" \
+        'NR>=from && NR<=to {print}' "$prepared.pool" > "$prepared"
     count=$(count_lines "$prepared")
-    if [ "$count" -eq 0 ]; then
-        home_status 'No discovery videos available; press X to retry.'
-        exit 4
-    fi
+    [ "$count" -gt 0 ] || { home_status 'No discovery videos available; press X to retry.'; exit 4; }
+    mv -f "$prepared.pool" "$pool"
+    printf '%s\n' "$discovery_query" > "$queryfile.tmp.$$";mv -f "$queryfile.tmp.$$" "$queryfile"
+    printf '%s\n' "$((position+count))" > "$pointer.tmp.$$";mv -f "$pointer.tmp.$$" "$pointer"
+    printf '%s\n' "$scanned" > "$scanfile.tmp.$$";mv -f "$scanfile.tmp.$$" "$scanfile"
     mv -f "$prepared" "$out"
-    seconds > "$stamp.tmp.$$"
-    mv -f "$stamp.tmp.$$" "$stamp"
-    home_status "$count real videos loaded. Press X to refresh."
-    printf 'home mode=%s duration=%ss count=%s\n' "$category" "$(( $(seconds)-started ))" "$count" >> "$DATA/timing.log"
-    # Keep Explore's old cache aliases temporarily for 0.9.10 regression compatibility.
+    seconds > "$stamp.tmp.$$";mv -f "$stamp.tmp.$$" "$stamp"
+    home_status "$count videos loaded. Press X for another four."
+    printf 'home mode=%s duration=%ss count=%s pool=%s scanned=%s\n' "$category" "$(( $(seconds)-started ))" "$count" "$total" "$scanned" >> "$DATA/timing.log"
     if [ "$category" = explore ]; then
         cp "$out" "$DATA/home-results.tsv"
         cp "$stamp" "$DATA/home-updated.txt"
@@ -484,7 +562,7 @@ thumbs)
     # Search screen requests only the FOUR currently visible thumbnails.
     first="${2:-0}"
     case "$first" in ''|*[!0-9]*) exit 2;; esac
-    [ "$first" -le 36 ] || exit 2
+    [ "$first" -le 116 ] || exit 2
     [ -f "$DATA/search-results.tsv" ] || exit 0
     awk -F '[|][|][|]' -v from="$((first + 1))" -v to="$((first + 4))"       'NR>=from && NR<=to && length($1)==11 && $1~/^[A-Za-z0-9_-]+$/ {print $1}' "$DATA/search-results.tsv" |        while IFS= read -r thumb_id; do valid_id "$thumb_id" && fetch_thumb "$thumb_id"; done
     ;;
@@ -501,10 +579,12 @@ remember)
     } > "$DATA/watch-history.tsv.tmp.$$"
     mv -f "$DATA/watch-history.tsv.tmp.$$" "$DATA/watch-history.tsv"
     # Don't show a previous video's recommendations under For You.
-    rm -f "$DATA/home-foryou-updated.txt" "$DATA/home-foryou-results.tsv"
+    rm -f "$DATA/home-foryou-updated.txt" "$DATA/home-foryou-results.tsv" \
+      "$DATA/home-foryou-pool.tsv" "$DATA/home-foryou-position.txt" "$DATA/home-foryou-scan.txt" "$DATA/home-foryou-query.txt"
     ;;
 clear-history)
-    rm -f "$DATA/watch-history.tsv" "$DATA/home-foryou-results.tsv" "$DATA/home-foryou-updated.txt" "$DATA/home-foryou-status.txt"
+    rm -f "$DATA/watch-history.tsv" "$DATA/home-foryou-results.tsv" "$DATA/home-foryou-updated.txt" "$DATA/home-foryou-status.txt" \
+      "$DATA/home-foryou-pool.tsv" "$DATA/home-foryou-position.txt" "$DATA/home-foryou-scan.txt" "$DATA/home-foryou-query.txt"
     status 'Local viewing history cleared; other preferences kept.'
     ;;
 cache-size)
@@ -515,13 +595,14 @@ clear-cache)
     before_kib=$(cache_size_kib)
     rm -rf "$YT_CACHE"
     mkdir -p "$YT_CACHE"
-    rm -f "$CACHE_DIR"/slot-* "$CACHE_DIR"/resolve-*.tmp "$CACHE_DIR"/live-hls.m3u8 "$CACHE_DIR"/live-ready
+    rm -f "$CACHE_DIR/direct-live" "$CACHE_DIR"/slot-* "$CACHE_DIR"/resolve-*.tmp "$CACHE_DIR"/live-hls.m3u8 "$CACHE_DIR"/live-ready
     rm -f /tmp/mustardtube-thumb-???????????.jpg /tmp/mustardtube-thumb-???????????.jpg.tmp.*
     # Radio station directories are disposable; favourites remain user data.
-    rm -f "$DATA/radio-countries.tsv" "$DATA/radio-stations.tsv" "$DATA/radio-status.txt"
+    rm -f "$DATA/radio-countries.tsv" "$DATA/radio-stations.tsv" "$DATA/radio-status.txt" "$DATA/radio-pagination.tsv"
     # Radio logos are disposable, favourites and country choice are retained.
     rm -rf "$DATA/radio-logo-cache"
     rm -f "$DATA"/home-*-results.tsv "$DATA"/home-*-updated.txt "$DATA"/home-*-status.txt \
+      "$DATA"/home-*-pool.tsv "$DATA"/home-*-position.txt "$DATA"/home-*-scan.txt "$DATA"/home-*-query.txt \
       "$DATA/home-results.tsv" "$DATA/home-updated.txt" "$DATA/home-status.txt" "$DATA/selected-origin.txt" \
       "$DATA/search-results.tsv" "$DATA/cached-query.txt" "$DATA/cached-search-time.txt" \
       "$DATA/search-cursor.txt" "$DATA/more-available.txt" "$DATA/next-result-index.txt" \
@@ -613,7 +694,7 @@ prefetch|resolve)
 invalidate)
     read_selection || exit 3
     slot=$(printf '%s:%s' "$id" "$quality" | cksum | awk '{print $1 % 4}')
-    rm -f "$CACHE_DIR/slot-$slot" "$CACHE_DIR/live-ready" "$CACHE_DIR/live-hls.m3u8" "$DATA/prefetch-ready.txt" "$DATA/stream-url.txt" "$DATA/stream-kind.txt"
+    rm -f "$CACHE_DIR/direct-live" "$CACHE_DIR/slot-$slot" "$CACHE_DIR/live-ready" "$CACHE_DIR/live-hls.m3u8" "$DATA/prefetch-ready.txt" "$DATA/stream-url.txt" "$DATA/stream-kind.txt"
     ;;
 *) echo 'Usage: youtube-backend.sh home|home-thumbs|thumbs|remember|clear-history|search|more|prefetch|resolve|invalidate|cache-size|clear-cache' >&2; exit 2;;
 esac
