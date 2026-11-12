@@ -1,8 +1,8 @@
 # MustardTube — YouTube and Internet Radio for muOS
 
-**Current release: v0.9.11 Beta 2.2.7 (pre-release)**  
+**Current release: v0.9.11-beta2.4.2 (pre-release)**  
 **Candidate release: v0.9.11 Beta 2.4.1 (GPL-3.0-only; opt-in daily update checks and verified OTA preparation; hardware validation pending).**
-**Current hardware-tested baseline: v0.9.11 Beta 2.4.0 on RG35XX Plus and RG35XX SP (user-reported passes).**
+**Current hardware-tested baseline: v0.9.11 Beta 2.4.2 on RG35XX Plus and RG35XX SP (user-reported passes).**
 **Hardware-tested baseline: v0.9.11 Beta 2.2.7 (previous MIT release).**  
 
 ![MustardTube branding](assets/branding/mustardtube-wordmark-reference.png)
