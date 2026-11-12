@@ -1,12 +1,18 @@
-# Beta 2.3.1 UI/UX polish build note (current candidate)
+# Current Beta 2.4.2 packaging workflow
 
-Beta 2.3.1 refines the hardware-tested Beta 2.3.0 UI without changing the
-multimedia backend. Run the root `build-package.sh` with the intact Beta 2.2.7
-`.muxapp` as its argument. It verifies all three packaged theme palettes,
-muOS monochrome glyph and both header logo variants; outputs end in
-`Beta2.3.1-UI-Polish.muxapp` and `Beta2.3.1-Source.zip`.
-The historical Beta 2.2.8 instructions follow. No ARM64 installer has been
-built in this environment; build and test in Ubuntu before installation.
+Use the repository-root `build-package.sh` with the intact, verified
+Beta 2.2.7 `.muxapp` as its argument. The script runs source tests, rebuilds
+the first-party ARM64 GUI and hotkey helper, retains the baseline's bundled
+runtimes, and packages all four themes and the OTA update UI. Output files:
+`dist/MustardTube-v0.9.11-Beta2.4.2-OTA.muxapp`,
+`dist/MustardTube-v0.9.11-Beta2.4.2-Source.zip`, and
+`dist/SHA256SUMS.txt`.
+
+The baseline `.muxapp` is **not** part of this repository source archive;
+the build is therefore not fully standalone. Rights and corresponding-source
+obligations for the bundled third-party runtimes must be resolved before
+public binary distribution. This document's older build guidance follows
+for historical reference; use the root script for the current release.
 
 ---
 

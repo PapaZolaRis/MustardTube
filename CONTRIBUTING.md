@@ -9,7 +9,7 @@ credentials, or personal viewing/search history.**
 Test changes on a real H700 handheld; no claim of compatibility is made for
 other devices, or for Goose/Jacaranda versions of muOS.
 
-Starting with planned Beta 2.2.8, first-party contributions are proposed under
+For the GPLv3 release line, first-party contributions are accepted under
 `GPL-3.0-only` (see `LICENSE`) if contributors have rights to submit them.
 Contributors should confirm they are authorized to license their work under
 GPLv3 only and preserve notices for prior contributions. Do not submit source

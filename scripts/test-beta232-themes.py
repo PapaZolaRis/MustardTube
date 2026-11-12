@@ -3,7 +3,7 @@
 from pathlib import Path
 import re
 r=Path(__file__).resolve().parent.parent
-s=(r/'src/main.c').read_text(); build=(r.parent/'build-package.sh').read_text()
+s=(r/'src/main.c').read_text(); build=(r/'build-package.sh').read_text()
 assert '#define TCOUNT 4' in s
 assert '"midnight", "forest", "paper", "acidbloom"' in s
 assert 'int x=MT_HOME_X+(i%2)*244,y=161+(i/2)*80;' in s

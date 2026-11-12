@@ -4,7 +4,7 @@ from pathlib import Path
 import struct, zlib, re, subprocess
 root=Path(__file__).resolve().parent.parent
 source=(root/'src/main.c').read_text()
-build=(root.parent/'build-package.sh').read_text()
+build=(root/'build-package.sh').read_text()
 
 def contrast(a,b):
     def lum(color):

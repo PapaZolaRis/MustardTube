@@ -66,7 +66,7 @@ assert '"branding/header-dark.png"' in src
 assert '"branding/header-paper.png"' in src
 assert 'SDL_RenderSetLogicalSize(a->r,W,H)' in src
 # Packaging paths must agree with runtime paths.
-builder=(root.parent/'build-package.sh').read_text()
+builder=(root/'build-package.sh').read_text()
 for path in ('glyph/mustardtube.png','grid/mustardtube.png','assets/themes/midnight.theme'):
     assert path in builder
 assert 'cmp -s "$source" <(unzip -p "$out" "MustardTube/$installed")' in builder
