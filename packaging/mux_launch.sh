@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
 # HELP: MustardTube - YouTube videos via stock Wasabi
 # GRID: MustardTube
 # ICON: mustardtube
@@ -21,6 +22,19 @@ if [ -r /opt/muos/share/font/internal/Inter.ttf ]; then
     MUSTARDTUBE_FONT="/opt/muos/share/font/internal/Inter.ttf"
     export MUSTARDTUBE_FONT
 fi
+# A cheap shell gate avoids loading bundled Node on every normal app launch.
+# One bounded check per day at most, opt-out, no daemon or automatic download.
+auto_setting=$(cat "$APP_DIR/data/ota-auto-check.txt" 2>/dev/null || echo on)
+last_check=$(cat "$APP_DIR/data/ota-last-check.txt" 2>/dev/null || echo 0)
+now_sec=$(date +%s)
+case "$last_check" in *[!0-9]*|'') last_check=0;; esac
+case "$now_sec" in *[!0-9]*|'') now_sec=0;; esac
+if [ "$auto_setting" != off ] && [ -x "$RADIO_NODE" ] && [ -r "$APP_DIR/scripts/ota-update.js" ]; then
+    if [ "$now_sec" -gt 0 ] && [ $((now_sec * 1000 - last_check)) -ge 86400000 ]; then
+        "$RADIO_NODE" "$APP_DIR/scripts/ota-update.js" check-if-due >> "$LOG" 2>&1 &
+    fi
+fi
+rm -f "$APP_DIR/data/seek-video.part" "$APP_DIR/data/seek-audio.part" "$APP_DIR/data/seek-output.part" "$APP_DIR/data/seek-recording.mp4"
 resume=""
 while :; do
     # Refresh the small status marker; the controller verifies PID identity
@@ -37,6 +51,7 @@ while :; do
     fi
     case "$resume" in
     style) ./bin/mustardtube --assets "$APP_DIR/assets" --show-style >> "$LOG" 2>&1;;
+    updates) ./bin/mustardtube --assets "$APP_DIR/assets" --show-updates >> "$LOG" 2>&1;;
     radio) ./bin/mustardtube --assets "$APP_DIR/assets" --show-radio >> "$LOG" 2>&1;;
     radio-now) ./bin/mustardtube --assets "$APP_DIR/assets" --show-radio-now >> "$LOG" 2>&1;;
     player) ./bin/mustardtube --assets "$APP_DIR/assets" --resume-player >> "$LOG" 2>&1;;
@@ -45,6 +60,17 @@ while :; do
     esac
     result=$?
     case "$result" in
+    88|89)
+        # A short-lived, opt-in Node worker checks or downloads while the SDL
+        # interface remains responsive. Never install over a running binary.
+        if [ -x "$RADIO_NODE" ] && [ -r "$APP_DIR/scripts/ota-update.js" ]; then
+            case "$result" in 88) task=check;; 89) task=prepare;; esac
+            "$RADIO_NODE" "$APP_DIR/scripts/ota-update.js" "$task" >> "$LOG" 2>&1 &
+        else
+            printf 'state=error\ndetail=Update service unavailable\n' > "$APP_DIR/data/ota-status.txt"
+        fi
+        resume=updates
+        ;;
     81)
         sh "$APP_DIR/scripts/youtube-backend.sh" clear-cache >> "$LOG" 2>&1 || true
         resume=style
@@ -81,6 +107,7 @@ while :; do
                 echo "player_invoked_at=$started" >> "$APP_DIR/data/timing.log"
                 player_rc=0
                 case "$stream_kind" in
+                    live_direct) "$WASABI" --live --title "$title" "$stream" >/dev/null 2>&1 || player_rc=$?;;
                     live|vod_hls)
                         # Only trusted backend-produced private HLS playlists.
                         # Recorded HLS uses Wasabi's ordinary VOD mode so seeking
@@ -96,7 +123,9 @@ while :; do
                                 else player_rc=4; fi;;
                             *) player_rc=4;;
                         esac
-                        rm -f "$stream" "${stream%/*}/live-ready";;
+                        case "$stream" in
+                            /tmp/mustardtube-streams-*/live-hls.m3u8) rm -f "$stream" "${stream%/*}/live-ready";;
+                        esac;;
                     *) "$WASABI" --title "$title" "$stream" >/dev/null 2>&1 || player_rc=$?;;
                 esac
                 elapsed=$(( $(date +%s)-started ))
@@ -107,7 +136,7 @@ while :; do
                 fi
                 # A failed or very short launch must not reuse a bad signed URL.
                 # Do not auto-relaunch: the user may have deliberately exited.
-                if [ "$stream_kind" = live ] || [ "$stream_kind" = vod_hls ] || [ "$player_rc" -ne 0 ] || [ "$elapsed" -lt 5 ]; then
+                if [ "$stream_kind" = live_direct ] || [ "$stream_kind" = live ] || [ "$stream_kind" = vod_hls ] || [ "$player_rc" -ne 0 ] || [ "$elapsed" -lt 5 ]; then
                     sh "$APP_DIR/scripts/youtube-backend.sh" invalidate >/dev/null 2>&1 || true
                 fi
             fi

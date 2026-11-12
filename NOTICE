@@ -1,0 +1,17 @@
+MustardTube - first-party copyright and distribution information
+Copyright (c) 2026 MustardTube contributors (existing copyright notice retained)
+Maintainer: PapaZolaRis
+Official repository: https://github.com/PapaZolaRis/MustardTube
+
+Starting with the planned v0.9.11 Beta 2.2.8 release, first-party source
+for which copyright permissions permit relicensing is offered under the GNU
+General Public License version 3 only (SPDX: GPL-3.0-only). See LICENSE.
+
+Previously released MIT-licensed versions retain their original permissions;
+see docs/HISTORICAL-MIT-LICENSE.txt for the prior license notice. This file
+does not assert ownership of third-party material or change its license.
+
+Third-party FFmpeg/ffplay, yt-dlp, QuickJS, Node.js, SDL, and Twemoji
+components or artwork remain under their respective terms. See the
+third-party notices shipped in the application and
+docs/THIRD-PARTY-LICENSE-REVIEW.md for outstanding compliance checks.

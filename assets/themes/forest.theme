@@ -1,11 +1,14 @@
+# MustardTube Beta 2.3.2 theme. Flat, high-contrast colors.
 name=Forest
-background=#0C1818
-background_bottom=#112927
-surface=#19332F
-surface_alt=#21453C
-surface_selected=#2D584C
-text=#F2F7E9
-muted=#B5C9BC
-accent=#D8E88E
-secondary=#77D7BB
-outline=#426456
+background=#11241E
+background_bottom=#11241E
+surface=#243A31
+surface_alt=#2D4A3D
+surface_selected=#385849
+text=#F2F5E9
+muted=#BECFC4
+accent=#C7DB91
+accent_ink=#C7DB91
+accent_text=#17271E
+secondary=#81B7A3
+outline=#567163

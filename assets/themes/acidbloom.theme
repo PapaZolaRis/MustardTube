@@ -1,0 +1,14 @@
+# MustardTube Beta 2.3.2 theme. Flat, high-contrast colors.
+name=Acid Bloom
+background=#190F2B
+background_bottom=#190F2B
+surface=#302047
+surface_alt=#402D5F
+surface_selected=#503768
+text=#F7F1FF
+muted=#D8CDDF
+accent=#DFFF63
+accent_ink=#DFFF63
+accent_text=#190F2B
+secondary=#FF64B5
+outline=#745B91

@@ -17,9 +17,12 @@ Nothing here excludes liability that cannot legally be excluded.
 MustardTube is an unofficial project. It is not endorsed by YouTube, Google,
 or the muOS project.
 
-The original MustardTube project is provided under the MIT licence, which
-contains additional warranty/liability terms. Third-party components remain
-subject to their own licences. This notice does not replace those licences.
+Starting with the first published v0.9.11 Beta 2.2.8 release, the relicensable
+first-party MustardTube code is offered under GNU GPL version 3 only
+(SPDX: GPL-3.0-only). Previous MIT releases retain their original licensing.
+See licenses/LICENSE for the complete GPLv3 text, and licenses/NOTICE.txt for
+copyright information. Third-party components retain their own licences.
+This user notice does not replace or limit those licences.
 
 Playback notes:
 - Normal recorded video 360p and 480p: seeking supported.

@@ -1,20 +1,32 @@
-# Building MustardTube v0.9.11 Beta 2.2.6a
+# Beta 2.3.1 UI/UX polish build note (current candidate)
+
+Beta 2.3.1 refines the hardware-tested Beta 2.3.0 UI without changing the
+multimedia backend. Run the root `build-package.sh` with the intact Beta 2.2.7
+`.muxapp` as its argument. It verifies all three packaged theme palettes,
+muOS monochrome glyph and both header logo variants; outputs end in
+`Beta2.3.1-UI-Polish.muxapp` and `Beta2.3.1-Source.zip`.
+The historical Beta 2.2.8 instructions follow. No ARM64 installer has been
+built in this environment; build and test in Ubuntu before installation.
+
+---
+
+# Building MustardTube v0.9.11 Beta 2.2.8 (GPL / branding source)
 
 This is the developer build procedure for the source release targeting **muOS
 2606.0 Andromeda**, ARM64, on the **RG35XX Plus** and **RG35XX SP**. The
-prebuilt `.muxapp` for this release was successfully tested on both devices;
-your newly compiled build still needs independent testing.
+previous Beta 2.2.7 `.muxapp` was hardware-tested on both devices.
+Beta 2.2.8 has **not** been compiled or hardware-tested yet.
 
 ## Important distinction: installer versus source
 
-The GitHub source archive contains project source, documentation, tests and
+This Beta 2.2.8 developer source archive contains project source, documentation, tests and
 small artwork. It **does not** contain compiled `mustardtube`, `radio-hotkeys`,
 `ffplay-radio`, Node.js, yt-dlp or QuickJS. Do not install the source ZIP using
-muOS Archive Manager. End users should download the release's
-`MustardTube-v0.9.11-Beta2.2.6a.muxapp` instead.
+muOS Archive Manager. End users should install the matching Beta 2.2.8 `.muxapp` **only after**
+it has been built, audited and published. Keep the tested Beta 2.2.7 installer as fallback.
 
-The current developer packaging workflow reuses a **known-good Beta 2.1
-`.muxapp`** to preserve its verified Node/yt-dlp/QuickJS runtime. Rebuilding
+The Beta 2.2.8 **root `build-package.sh`** workflow reuses a **validated
+Beta 2.2.7 HD Streaming `.muxapp`** to preserve its verified Node/yt-dlp/QuickJS runtime. Rebuilding
 only the SDL2 application is not enough for a complete installer.
 
 ## Build prerequisites
@@ -23,18 +35,19 @@ only the SDL2 application is not enough for a complete installer.
   Ninja, CMake, `make`, `pkg-config`, `zip`, `unzip`, `file` and `readelf`.
 - ARM64 SDL2, SDL2_ttf, SDL2_image and OpenSSL development headers/libraries.
 - Node.js and Python 3 for the source tests.
-- A compatible Beta 2.1 `.muxapp` baseline retained locally.
+- The hardware-tested Beta 2.2.7 HD Streaming `.muxapp` available locally.
 - The reviewed source tree for FFmpeg/ffplay. The tested player was built from
   FFmpeg 8.1.3; see `tools/FFPLAY_SOURCE.txt`. Respect third-party licences and
   corresponding-source obligations when distributing compiled software.
 
 ## Step 1: Run source tests
 
-From the repository root:
+From the `SOURCE/` directory:
 
 ```bash
 bash scripts/test-beta22-source.sh
 bash scripts/test-beta226a-ui.sh
+bash scripts/test-gpl-migration.sh
 ```
 
 The suite covers radio process lifecycle, background audio controller,
@@ -73,6 +86,23 @@ playing games, or device-specific power management.
 
 ## Step 4: Package using the proven runtime baseline
 
+For the new GPL / branding release use **`build-package.sh` in the
+extracted archive root (parent of `SOURCE/`)**, not the historical packaging commands below. This
+builder verifies baseline script hashes, rebuilds the ARM64 GUI and hotkey
+helper from source,
+replaces GUI icons, installs GPLv3 notices and includes the GPL-first-party
+source ZIP with the `.muxapp` installer. All bundled third-party source/license
+obligations remain your responsibility to audit before publishing.
+
+```bash
+cd /path/to/extracted/Beta2.2.8
+bash build-package.sh /path/to/MustardTube-v0.9.11-Beta2.2.7-HD-Streaming.muxapp
+```
+
+The old experimental instructions below are retained for historical reference.
+
+### Historical Beta 2.2.6a packaging (disabled with GPLv3 license; do not run)
+
 ```bash
 bash scripts/package-beta22-from-beta21-installer.sh \
   /absolute/path/to/MustardTube-v0.9.11-Beta2.1.muxapp
@@ -86,7 +116,7 @@ for Beta 2.2.6a validation. It checks that the compiled executables are
 current and ARM64, copies the existing stable runtime from Beta 2.1, and
 checks that its runtime executables remain unmodified.
 
-The official GitHub release asset uses the shortened external filename
+A previous GitHub release used the shortened external filename
 `MustardTube-v0.9.11-Beta2.2.6a.muxapp`. Its **internal installer content is
 unchanged** from the developer installer. Use the separately provided release
 packaging script to export that filename and generate checksums; do not rename

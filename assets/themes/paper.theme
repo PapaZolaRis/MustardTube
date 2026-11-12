@@ -1,11 +1,14 @@
+# MustardTube Beta 2.3.2 theme. Flat, high-contrast colors.
 name=Paper
-background=#E8E9E2
-background_bottom=#D9E1DB
-surface=#F8F6EF
-surface_alt=#E0E8E6
-surface_selected=#D6E4D8
-text=#19293A
-muted=#5B6974
-accent=#DFAE3F
-secondary=#277B77
-outline=#BBC9C4
+background=#F5F0E6
+background_bottom=#F5F0E6
+surface=#FFFCF6
+surface_alt=#EBE6DA
+surface_selected=#F7E5C5
+text=#28353A
+muted=#59666A
+accent=#E8BB68
+accent_ink=#875712
+accent_text=#28353A
+secondary=#3F6963
+outline=#BBC6BF

@@ -1,6 +1,12 @@
 # MustardTube — YouTube and Internet Radio for muOS
 
-**Current release: v0.9.11 Beta 2.2.6a (pre-release)**  
+**Current release: v0.9.11 Beta 2.2.7 (pre-release)**  
+**Candidate release: v0.9.11 Beta 2.4.1 (GPL-3.0-only; opt-in daily update checks and verified OTA preparation; hardware validation pending).**
+**Current hardware-tested baseline: v0.9.11 Beta 2.4.0 on RG35XX Plus and RG35XX SP (user-reported passes).**
+**Hardware-tested baseline: v0.9.11 Beta 2.2.7 (previous MIT release).**  
+
+![MustardTube branding](assets/branding/mustardtube-wordmark-reference.png)
+
 **Developer: PapaZolaRis**  
 **Target firmware: muOS 2606.0 Andromeda (ARM64)**
 
@@ -8,11 +14,11 @@ MustardTube is an unofficial, lightweight, controller-friendly YouTube browser a
 
 Video playback uses the stock **Wasabi** media player. Background radio uses a bundled, dedicated **`ffplay-radio`** player and its controller; it does **not** run Wasabi in the background. The prebuilt `.muxapp` is designed for installation without PortMaster, a Google account, a YouTube API key or manual installation of additional system dependencies.
 
-**[Download Beta 2.2.6a](https://github.com/PapaZolaRis/MustardTube/releases#release-v0.9.11-Beta2.2.6a)** | **[Report an issue](https://github.com/PapaZolaRis/MustardTube/issues)**
+**[Official releases](https://github.com/PapaZolaRis/MustardTube/releases)** | **[Report an issue](https://github.com/PapaZolaRis/MustardTube/issues)**
 
 ## Release status and compatibility
 
-Beta 2.2.6a is a **public pre-release**, not a stable release. The current release has been built, packaged and tested on both of the following devices:
+Beta 2.2.7 is a **hardware-tested pre-release**, not a stable release. The earlier build was tested on both of the following devices:
 
 | Device | Firmware | Hardware test status |
 | --- | --- | --- |
@@ -30,8 +36,8 @@ Older muOS versions, including Goose and Jacaranda, are not current development 
 ### YouTube Home and Search
 
 - Discover videos through **Explore, Popular, For You, Music, Gaming and Tech** categories.
-- Browse thumbnail cards with titles and channel information.
-- Search YouTube from the handheld and press **X** repeatedly to load additional results, up to **40** in total.
+- Browse four Home thumbnail cards at a time. Press **X** to cycle through additional real discovery results, including more than 100 distinct results where YouTube supplies them.
+- Search YouTube from the handheld and press **X** repeatedly to load additional results, up to **120** in total.
 - View video details before starting playback.
 - Home discovery is search-based, not an official YouTube Trending feed. **For You** uses optional local viewing history rather than an account-based YouTube recommendation feed.
 
@@ -46,16 +52,16 @@ Older muOS versions, including Goose and Jacaranda, are not current development 
 ### Internet Radio
 
 - Browse stations by country; country and station lists are alphabetical.
-- Includes **249** bundled country flags, available station logos, favorites and paginated station results.
+- Includes **249** bundled country flags, available station logos, favorites and paginated station results without the previous 80-station cap. The number available depends on the directory or playlist, safe network limits and device memory.
 - Uses a built-in audio-only radio player for normal radio listening and background playback.
 - Can continue playing Internet Radio while the user leaves MustardTube and plays games.
-- The **Radio / Now Playing** screen displays station details, radio status and separate volume controls.
+- The **Radio / Now Playing** screen displays station details, radio status and separate volume controls. The redundant Settings radio-volume slider has been removed; Settings still controls the in-game hotkey mode.
 - A Wasabi radio playback option is also available as a fallback for compatible stations.
 - Station availability depends on the broadcaster, network and stream format.
 
 ### Independent Radio and Game Volume
 
-Beta 2.2.6a provides separate **Radio Volume** and **Game Volume** sliders in **Radio / Now Playing**. During an active background radio session, the game slider controls a detected, supported game-audio stream while **RADIO+GAME** mode is enabled.
+Beta 2.2.7 provides separate **Radio Volume** and **Game Volume** sliders in **Radio / Now Playing**. During an active background radio session, the game slider controls a detected, supported game-audio stream while **RADIO+GAME** mode is enabled.
 
 - Radio and game levels can be adjusted independently in 5% steps.
 - In-game volume shortcuts support single-press adjustment and faster press-and-hold repeat.
@@ -81,27 +87,53 @@ Hotkey modes are **OFF**, **RADIO** (radio-only shortcuts), and **RADIO+GAME** (
 
 Some games or emulators may map these same buttons to their own controls. Test the mapping with your preferred emulator.
 
+### GitHub Releases updates (Beta 2.4.1)
+
+From **Settings**, press **SELECT** for **Software updates**. The app can check
+for new releases **once per day when launched** (default ON, can be turned OFF).
+No automatic download occurs. You may also press **Check for updates** manually.
+
+When a newer release is offered, choose **Prepare verified update**. The updater
+pins the release version, asset filename, digest and size; rechecks these
+before downloading; and verifies SHA-256, ZIP CRC and archive layout. A
+bounded snapshot of theme preferences, favourites, volume and viewing history
+is saved to `ARCHIVE/.mustardtube-recovery/` for supervised recovery. The
+installer itself is placed in SD-card `ARCHIVE`.
+
+When Ready, choose **Exit for Archive Manager**, then select the `.muxapp` in
+**Applications → Archive Manager**. MustardTube deliberately does not invoke
+undocumented muOS installation internals or overwrite itself. The update is
+user-controlled, and automatic rollback is not yet available. Keep a known-good
+installer for rollback. Only official public GitHub Releases with correctly
+named assets and GitHub-provided SHA-256 digests are eligible. GitHub digests
+provide integrity, **not independent maintainer signing**.
+
+For publishing requirements and recovery information, see
+[OTA release publishing](docs/OTA-RELEASE-PUBLISHING.md).
+
 ### Themes and maintenance
 
-- Three themes: **Midnight**, **Forest** and **Paper**.
+- Four themes: **Midnight (Black Gold)**, **Paper (Champagne Linen)**, **Forest (Botanical Club)**, and **Acid Bloom**.
 - **Clear Cache** removes disposable cached content while preserving user preferences and radio favorites.
 - **Clear Viewing History** is available separately.
 - Includes an in-app About / User Guide with controls, troubleshooting and legal notices.
 
 ## Download and installation
 
-**Latest installer:** `MustardTube-v0.9.11-Beta2.2.6a.muxapp`
+**Previously validated baseline:** `MustardTube-v0.9.11-Beta2.2.7-HD-Streaming.muxapp`
 
-1. Visit the [Beta 2.2.6a GitHub pre-release](https://github.com/PapaZolaRis/MustardTube/releases#release-v0.9.11-Beta2.2.6a).
-2. Download `MustardTube-v0.9.11-Beta2.2.6a.muxapp` from the release assets.
+1. Visit the [official GitHub Releases page](https://github.com/PapaZolaRis/MustardTube/releases).
+2. Download a verified installer for the release you intend to use; Beta 2.4.1 is a test candidate, **not yet published**.
 3. Copy the `.muxapp` to the SD card's **`ARCHIVE`** folder.
 4. On the handheld, open **Applications → Archive Manager** and install the package.
 5. Connect to Wi-Fi and launch **MustardTube** from Applications.
 6. For in-game dual volume control, choose **RADIO+GAME** in the radio player or Settings.
 
-**Before updating:** Back up the existing MustardTube `data` directory if you want to protect favorites, history and preferences.
+**Before updating:** Keep a known-good installer. The OTA Prepare operation
+backs up selected preferences, history and favourites, but a manual backup is
+still prudent before using Archive Manager.
 
-The `.muxapp` is a compiled end-user installer. The separately available **`MustardTube-v0.9.11-Beta2.2.6a-Source.zip`** contains source code and small project assets, **not** the compiled installable application.
+The `.muxapp` is a compiled end-user installer. The separately available **version-matched source ZIP** contains source code and small project assets, **not** the compiled installable application.
 
 ## Main controls
 
@@ -128,6 +160,9 @@ The `.muxapp` is a compiled end-user installer. The separately available **`Must
 | **Radio / Now Playing: Y** | Open Wasabi radio fallback |
 | **Radio / Now Playing: B** | Return to station list |
 | **Settings: START** | Cycle hotkey mode |
+| **Settings: SELECT** | Open software updates |
+| **Software updates: A** | Check, download, or change update channel |
+| **Software updates: B** | Return to Settings |
 | **Settings: X / Y** | Clear Cache / Clear Viewing History |
 | **About: Up/Down** | Scroll guide |
 | **About: X / Y** | Jump between guide sections |
@@ -182,6 +217,40 @@ Development builds require an appropriately configured AArch64 cross-compilation
 
 MustardTube is not affiliated with or endorsed by YouTube, Google, Anbernic or MustardOS.
 
-Project source code is distributed under the [MIT License](LICENSE). Third-party binaries and artwork have their own applicable licenses and notices. The bundled flag atlas uses Twemoji artwork under CC BY 4.0; see [`assets/flags/ATTRIBUTION.txt`](assets/flags/ATTRIBUTION.txt). Additional notices are available in [`docs/PAPAZOLARIS-USER-NOTICE.txt`](docs/PAPAZOLARIS-USER-NOTICE.txt).
+Beginning with the **first published Beta 2.2.8 release**, the first-party
+MustardTube code that the relevant rightsholders may relicense is distributed
+under [GNU GPL version 3 only](LICENSE) (`GPL-3.0-only`). Previously published
+MIT-licensed releases remain available under their original MIT permissions;
+this change does not retroactively remove those permissions. Forks, commercial
+redistribution and modifications are welcome, subject to the applicable licenses.
+**Official repository:** https://github.com/PapaZolaRis/MustardTube
+
+The source tree and corresponding release source archive should be published
+alongside GPL-covered executable releases. GPLv3 distribution requires access
+to the **actual Corresponding Source for the exact binaries distributed**;
+merely pointing to a different release or newer code is not sufficient.
+Before distributing an installer, complete the rights and bundled dependency
+checks in [RELICENSING-CHECKLIST.md](docs/RELICENSING-CHECKLIST.md) and
+[third-party review](docs/THIRD-PARTY-LICENSE-REVIEW.md).
+
+Third-party binaries and artwork have their own applicable licenses and notices. The bundled flag atlas uses Twemoji artwork under CC BY 4.0; see [`assets/flags/ATTRIBUTION.txt`](assets/flags/ATTRIBUTION.txt). Additional notices are available in [`docs/PAPAZOLARIS-USER-NOTICE.txt`](docs/PAPAZOLARIS-USER-NOTICE.txt).
 
 **Developer:** PapaZolaRis
+
+## Beta 2.4.1: Four-theme UI and safe update preparation
+
+All primary screens use a compact 4:3 left navigation sidebar and the approved
+MustardTube branding. Home and Search Results display **four equal-size video
+cards** (477 × 54 logical pixels) with matching 86 × 48 thumbnails. There is
+**no enlarged featured card**. Search keyboard, radio directory, Now Playing,
+Recent, Settings, About, video details and the matching pointer areas have been
+adapted to the same 640 × 480 frame. The app icon is decoded only once.
+
+Controller navigation, search, Wasabi, recorded/live streaming, radio mixing,
+preferences, existing four-image limits, release licensing and build dependencies
+are unchanged.
+
+**Performance budget:** at most one small, opt-out GitHub release check per
+day during app launches; no background polling, animated backgrounds,
+render targets, or concurrently decoded video thumbnails. Build and
+hardware validation on the RG35XX Plus and SP are required before deployment.
