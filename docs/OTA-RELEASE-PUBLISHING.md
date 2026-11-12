@@ -4,7 +4,7 @@ Official releases: https://github.com/PapaZolaRis/MustardTube/releases
 
 ## Current installation policy
 
-Beta 2.4.1 checks for releases automatically at most once per day when enabled
+Beta 2.4.2 checks for releases automatically at most once per day when enabled
 (default on; configurable in Software updates). Checking makes no changes to
 the installed software. Downloading requires the user to select **Prepare
 verified update**. After preparation, the user exits and selects the package in

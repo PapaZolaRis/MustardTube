@@ -1,13 +1,13 @@
 # MustardTube — YouTube and Internet Radio for muOS
 
-**Current release: v0.9.11-beta2.4.2 (pre-release)**  
-**Candidate release: v0.9.11 Beta 2.4.1 (GPL-3.0-only; opt-in daily update checks and verified OTA preparation; hardware validation pending).**
-**Current hardware-tested baseline: v0.9.11 Beta 2.4.2 on RG35XX Plus and RG35XX SP (user-reported passes).**
-**Hardware-tested baseline: v0.9.11 Beta 2.2.7 (previous MIT release).**  
+**Current source version: v0.9.11 Beta 2.4.2 (GPL-3.0-only; OTA progress and network-error refinement).**
+**Beta 2.4.2 hardware report: OTA upgrade and functional checks passed on RG35XX Plus; SP testing not yet confirmed for this build.**
+**Previously validated baseline: Beta 2.4.0 on RG35XX Plus and RG35XX SP.**
+**Historical MIT baseline: Beta 2.2.7; earlier permissions are unchanged.**
 
 ![MustardTube branding](assets/branding/mustardtube-wordmark-reference.png)
 
-**Developer: PapaZolaRis**  
+**Developer: PapaZolaRis**
 **Target firmware: muOS 2606.0 Andromeda (ARM64)**
 
 MustardTube is an unofficial, lightweight, controller-friendly YouTube browser and Internet Radio application for muOS handhelds. It provides video discovery, search and playback, a radio station browser, and a dedicated audio-only radio player that can continue playing while you play games.
@@ -18,12 +18,12 @@ Video playback uses the stock **Wasabi** media player. Background radio uses a b
 
 ## Release status and compatibility
 
-Beta 2.2.7 is a **hardware-tested pre-release**, not a stable release. The earlier build was tested on both of the following devices:
+Beta 2.4.2 is a **pre-release**, not a stable release. Testing status for this precise build differs by device:
 
 | Device | Firmware | Hardware test status |
 | --- | --- | --- |
-| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Passed |
-| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Passed |
+| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and functional checks passed (user-reported) |
+| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Beta 2.4.0 validated; Beta 2.4.2 OTA test still pending |
 
 Background radio, PPSSPP game-audio mixing, in-game volume shortcuts, automatic game-volume reset, and interface behavior were confirmed during these tests. Compatibility with every emulator or other muOS-supported handheld has **not** been established.
 
@@ -87,7 +87,7 @@ Hotkey modes are **OFF**, **RADIO** (radio-only shortcuts), and **RADIO+GAME** (
 
 Some games or emulators may map these same buttons to their own controls. Test the mapping with your preferred emulator.
 
-### GitHub Releases updates (Beta 2.4.1)
+### GitHub Releases updates (Beta 2.4.2)
 
 From **Settings**, press **SELECT** for **Software updates**. The app can check
 for new releases **once per day when launched** (default ON, can be turned OFF).
@@ -98,7 +98,7 @@ pins the release version, asset filename, digest and size; rechecks these
 before downloading; and verifies SHA-256, ZIP CRC and archive layout. A
 bounded snapshot of theme preferences, favourites, volume and viewing history
 is saved to `ARCHIVE/.mustardtube-recovery/` for supervised recovery. The
-installer itself is placed in SD-card `ARCHIVE`.
+installer itself is placed in SD-card `ARCHIVE`. Beta 2.4.2 adds a byte-based download progress display, verification stages, and user-friendly network-error messages.
 
 When Ready, choose **Exit for Archive Manager**, then select the `.muxapp` in
 **Applications → Archive Manager**. MustardTube deliberately does not invoke
@@ -123,7 +123,7 @@ For publishing requirements and recovery information, see
 **Previously validated baseline:** `MustardTube-v0.9.11-Beta2.2.7-HD-Streaming.muxapp`
 
 1. Visit the [official GitHub Releases page](https://github.com/PapaZolaRis/MustardTube/releases).
-2. Download a verified installer for the release you intend to use; Beta 2.4.1 is a test candidate, **not yet published**.
+2. Download a verified installer for the version you intend to install, ensuring that the installer and corresponding source belong to the same release.
 3. Copy the `.muxapp` to the SD card's **`ARCHIVE`** folder.
 4. On the handheld, open **Applications → Archive Manager** and install the package.
 5. Connect to Wi-Fi and launch **MustardTube** from Applications.
@@ -237,7 +237,7 @@ Third-party binaries and artwork have their own applicable licenses and notices.
 
 **Developer:** PapaZolaRis
 
-## Beta 2.4.1: Four-theme UI and safe update preparation
+## Beta 2.4.2: Four-theme UI and verified OTA preparation
 
 All primary screens use a compact 4:3 left navigation sidebar and the approved
 MustardTube branding. Home and Search Results display **four equal-size video
@@ -252,5 +252,7 @@ are unchanged.
 
 **Performance budget:** at most one small, opt-out GitHub release check per
 day during app launches; no background polling, animated backgrounds,
-render targets, or concurrently decoded video thumbnails. Build and
-hardware validation on the RG35XX Plus and SP are required before deployment.
+render targets, or concurrently decoded video thumbnails. The update screen
+shows byte-based download progress without introducing a graphics dependency.
+Beta 2.4.2 has been tested by the maintainer on RG35XX Plus; confirm this
+exact build on RG35XX SP before describing it as supported on both devices.

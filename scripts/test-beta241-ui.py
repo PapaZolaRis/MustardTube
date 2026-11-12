@@ -6,7 +6,7 @@ root=Path(__file__).resolve().parent.parent
 src=(root/'src/main.c').read_text()
 launcher=(root/'packaging/mux_launch.sh').read_text()
 updater=(root/'scripts/ota-update.js').read_text()
-build=(root.parent/'build-package.sh').read_text()
+build=(root/'build-package.sh').read_text()
 assert '#define MT_HOME_CARD_H 54' in src and '#define MT_HOME_W 477' in src
 assert '#define TCOUNT 4' in src and 'SDL_Texture *home_thumbs[HOME_VIDEOS]' in src
 assert 'WATCH  ·  LISTEN  ·  PLAY' in src

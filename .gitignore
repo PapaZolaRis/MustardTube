@@ -1,42 +1,26 @@
-# Local build and packaging output
-/build/
+# Generated packages and local build artifacts
 /dist/
-/out/
-/cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-compile_commands.json
-*.o
-*.obj
-*.a
-*.so
-*.so.*
+/build/
+/build-*/
+/release-beta226a/
 *.muxapp
 
-# Device-side and local state (not source)
-**/data/
-**/cache/
-**/tmp/
-**/downloads/
+# Generated runtime and device data
+/data/
+/cache/
+/logs/
+/tools/node
+/tools/qjs
+/tools/ffplay-radio
+/tools/radio-hotkeys
+/tools/yt-dlp-onedir/
+
+# Local temporary files and caches
+__pycache__/
+*.pyc
+*.o
+*.bmp
 *.log
-*.pid
-*.part
-*.tmp
-
-# Local credentials and settings
-.env
-.env.*
-!.env.example
-*.key
-*.pem
-
-# Editor and operating-system files
 .DS_Store
-Thumbs.db
-.vscode/
-.idea/
-*.swp
-*~
 
-# IMPORTANT: Do not ignore *.png or *.jpg: MustardTube tracks its
-# country-flag atlas, app artwork, and test image fixtures in Git.
+# Do not exclude source PNGs, test fixtures, or legal files.
