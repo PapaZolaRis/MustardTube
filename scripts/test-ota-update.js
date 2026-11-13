@@ -25,7 +25,7 @@ const {version,newer,assetIsOfficial,chooseRelease,validRedirect,validArchiveEnt
   safeStatus,candidateToData,validCandidate,releaseMatchesPinned,
   backupUserData,restoreUserData,shouldAutoCheck,downloadPinned,friendlyError}=updater;
 const digest='sha256:'+'c'.repeat(64);
-const tag='v0.9.11-beta2.4.3';
+const tag='v0.9.11-beta2.4.6';
 function asset(t,overrides={}) {
  const m=/^v(\d+\.\d+\.\d+)(?:-beta(\d+\.\d+\.\d+))?$/.exec(t);
  const name=`MustardTube-v${m[1]}${m[2]?'-Beta'+m[2]:''}-OTA.muxapp`;
@@ -36,13 +36,13 @@ function release(t,prerelease,overrides={}) {
 }
 (async()=>{
  try {
- const base=version('v0.9.11-beta2.4.2');
+ const base=version('v0.9.11-beta2.4.5');
  assert(base && base.beta && !newer(base,base));
  assert(newer(version(tag),base));
  assert(newer(version('v0.9.11'),base));
  assert(!newer(base,version('v0.9.11')));
  assert(!version('v0.9.11-beta2.4.2-trailing'));
- const rels=[release(tag,true),release('v0.9.11-beta2.4.4',true),release('v0.9.12',false),release('v0.9.13',false,{draft:true})];
+ const rels=[release(tag,true),release('v0.9.11-beta2.4.7',true),release('v0.9.12',false),release('v0.9.13',false,{draft:true})];
  assert.strictEqual(chooseRelease(rels,'beta').v.tag,'v0.9.12');
  assert.strictEqual(chooseRelease(rels,'stable').v.tag,'v0.9.12');
  assert.strictEqual(chooseRelease([release(tag,true)],'stable'),null);
@@ -52,7 +52,7 @@ function release(t,prerelease,overrides={}) {
  assert(!assetIsOfficial(asset(tag,{browser_download_url:'http://github.com/a'}),tag));
  assert(!assetIsOfficial(asset(tag,{browser_download_url:'https://evil.example/a'}),tag));
  assert(!assetIsOfficial(asset(tag,{name:'../bad.muxapp'}),tag));
- assert(!assetIsOfficial(asset(tag),'v0.9.11-beta2.4.4'));
+ assert(!assetIsOfficial(asset(tag),'v0.9.11-beta2.4.7'));
  assert(validRedirect('https://release-assets.githubusercontent.com/path'));
  assert(!validRedirect('https://evil.example/file'));
  assert(!validRedirect('http://github.com/a/file'));
@@ -66,7 +66,7 @@ function release(t,prerelease,overrides={}) {
  const pinned=candidateToData(sel,'beta');
  assert(validCandidate(pinned));
  assert(releaseMatchesPinned([release(tag,true)],pinned));
- assert(!releaseMatchesPinned([release('v0.9.11-beta2.4.4',true)],pinned),'must not switch release silently');
+ assert(!releaseMatchesPinned([release('v0.9.11-beta2.4.7',true)],pinned),'must not switch release silently');
  assert(!releaseMatchesPinned([release(tag,true,{assets:[asset(tag,{digest:'sha256:'+'d'.repeat(64)})]})],pinned));
  safeStatus('available','Update ready',tag,'88 MiB');
  assert(fs.readFileSync(path.join(data,'ota-status.txt'),'utf8').includes('state=available\n'));

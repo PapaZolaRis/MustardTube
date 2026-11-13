@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
-# Beta 2.4.2 OTA progress/error refinement with four-theme UI, controlled package rebuild. Requires hardware-validated Beta 2.2.7 installer
+# Beta 2.4.5 visual consistency on Beta 2.4.4 UI polish and Beta 2.4.3 personalization and validated Beta 2.4.2 OTA foundation with four-theme UI, controlled package rebuild. Requires hardware-validated Beta 2.2.7 installer
 # only for unchanged third-party runtimes and first-party radio helpers.
 set -euo pipefail
 if (( $# != 1 )); then
@@ -27,6 +27,10 @@ python3 scripts/test-beta232-themes.py
 node --check scripts/ota-update.js
 node scripts/test-ota-update.js
 python3 scripts/test-beta242-ota-ui.py
+python3 scripts/test-beta243-personalization.py
+python3 scripts/test-beta244-ui-polish.py
+python3 scripts/test-beta245-visual-states.py
+bash scripts/test-beta243-personalization.sh
 python3 scripts/test-beta241-ui.py
 python3 scripts/test-beta240-ui.py
 bash scripts/build-arm64-ubuntu.sh

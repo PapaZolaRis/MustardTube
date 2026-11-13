@@ -1,8 +1,9 @@
 # MustardTube — YouTube and Internet Radio for muOS
 
-**Current source version: v0.9.11 Beta 2.4.2 (GPL-3.0-only; OTA progress and network-error refinement).**
-**Beta 2.4.2 hardware report: OTA upgrade and functional checks passed on RG35XX Plus; SP testing not yet confirmed for this build.**
-**Previously validated baseline: Beta 2.4.0 on RG35XX Plus and RG35XX SP.**
+**Current development source: v0.9.11 Beta 2.4.5 (GPL-3.0-only; visual consistency).**
+**Beta 2.4.5: ARM64 build and integrity checks passed; RG35XX Plus 12/12 and RG35XX SP 11/11 hardware acceptance checks passed (user-reported).**
+**Beta 2.4.4: Plus functional and UI tests passed (user-reported); SP validation not yet confirmed.**
+**Hardware-validated rollback: Beta 2.4.2 OTA upgrade and functional tests passed on both RG35XX Plus and SP (user reported).**
 **Historical MIT baseline: Beta 2.2.7; earlier permissions are unchanged.**
 
 ![MustardTube branding](assets/branding/mustardtube-wordmark-reference.png)
@@ -18,12 +19,12 @@ Video playback uses the stock **Wasabi** media player. Background radio uses a b
 
 ## Release status and compatibility
 
-Beta 2.4.2 is a **pre-release**, not a stable release. Testing status for this precise build differs by device:
+Beta 2.4.5 is hardware-tested on both supported devices but is not yet approved for public binary release pending the outstanding source and licensing audit. Beta 2.4.2 remains an earlier hardware-validated rollback version:
 
 | Device | Firmware | Hardware test status |
 | --- | --- | --- |
-| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and functional checks passed (user-reported) |
-| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Beta 2.4.0 validated; Beta 2.4.2 OTA test still pending |
+| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and functional checks passed (user-reported); Beta 2.4.5 hardware tests passed (user-reported) |
+| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and lid-resume checks passed (user-reported); Beta 2.4.5 hardware tests passed (user-reported) |
 
 Background radio, PPSSPP game-audio mixing, in-game volume shortcuts, automatic game-volume reset, and interface behavior were confirmed during these tests. Compatibility with every emulator or other muOS-supported handheld has **not** been established.
 
@@ -40,6 +41,26 @@ Older muOS versions, including Goose and Jacaranda, are not current development 
 - Search YouTube from the handheld and press **X** repeatedly to load additional results, up to **120** in total.
 - View video details before starting playback.
 - Home discovery is search-based, not an official YouTube Trending feed. **For You** uses optional local viewing history rather than an account-based YouTube recommendation feed.
+
+### Personalization and UI polish (Beta 2.4.5 candidate)
+
+Beta 2.4.4 UI polish: the horizontal Updates-page borders are drawn in native pixels to prevent one-pixel corner clipping; the video-details thumbnail now uses a small dark, outlined play control instead of a large solid play disc. Default layout and playback behavior are unchanged.
+
+Beta 2.4.5 differentiates loading, empty results and playable content: theme-colored dots while refreshing, film-frame placeholders when video thumbnails are unavailable, and the same small actionable preview play control when an actual thumbnail is shown. No new image assets or dependencies are required.
+
+In **Settings**, press DOWN to highlight **Personalization**, then **A** to open it.
+Use UP/DOWN to select a preference and LEFT/RIGHT (or A) to change it.
+Preferences are stored in the existing SDL settings file and survive OTA backups:
+
+- **Navigation:** original vertical sidebar (default), horizontal top tabs, or compact sidebar.
+- **Results display:** original four-thumbnail cards (default), or six compact, text-first rows. Home continues to show four entries per discovery batch.
+- **Startup:** Home (default), Search, Recent or Radio.
+- **Content text:** Small, Normal (default), or Large; navigation/footer/branding sizes stay fixed to preserve 640×480 layout.
+- **Reset appearance:** press A twice to reset theme and presentation without deleting favorites, searches, media preferences or OTA configuration.
+
+Existing Settings shortcuts remain: A applies the selected theme, START cycles in-game hotkeys, SELECT opens OTA updates, X clears cache, and Y clears history. L1/R1 still cycles the six main tabs; B returns from personalization to Settings. Beta 2.4.5 does not add YouTube Shorts; that is planned separately after UI validation.
+
+**Note:** Alternate layouts have been tested on RG35XX Plus and SP. The source tests do not establish flawless display geometry or font readability on the real LCD.
 
 ### Video playback
 
