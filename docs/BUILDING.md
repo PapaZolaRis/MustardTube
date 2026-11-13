@@ -5,7 +5,7 @@ Beta 2.2.7 `.muxapp` as its argument. The script runs source tests, rebuilds
 the first-party ARM64 GUI and hotkey helper, retains the baseline's bundled
 runtimes, and packages all four themes, the OTA update UI and optional personalization.
 It also compiles and runs the host-only preference/reset regression harness.
-Beta 2.4.5 is not yet device-tested; keep Beta 2.4.2 available. Output files:
+Beta 2.4.5 passed ARM64 build verification and hardware acceptance on RG35XX Plus and SP (user-reported). Keep Beta 2.4.2 available for rollback. Output files:
 `dist/MustardTube-v0.9.11-Beta2.4.5-OTA.muxapp`,
 `dist/MustardTube-v0.9.11-Beta2.4.5-Source.zip`, and
 `dist/SHA256SUMS.txt`.

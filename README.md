@@ -19,12 +19,12 @@ Video playback uses the stock **Wasabi** media player. Background radio uses a b
 
 ## Release status and compatibility
 
-Beta 2.4.5 is a **development source candidate**, not a validated public release. The OTA-capable Beta 2.4.2 remains the hardware-validated rollback version:
+Beta 2.4.5 is hardware-tested on both supported devices but is not yet approved for public binary release pending the outstanding source and licensing audit. Beta 2.4.2 remains an earlier hardware-validated rollback version:
 
 | Device | Firmware | Hardware test status |
 | --- | --- | --- |
-| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and functional checks passed (user-reported); Beta 2.4.5 pending |
-| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and lid-resume checks passed (user-reported); Beta 2.4.5 pending |
+| Anbernic RG35XX Plus | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and functional checks passed (user-reported); Beta 2.4.5 hardware tests passed (user-reported) |
+| Anbernic RG35XX SP | muOS 2606.0 Andromeda | Beta 2.4.1 → Beta 2.4.2 OTA and lid-resume checks passed (user-reported); Beta 2.4.5 hardware tests passed (user-reported) |
 
 Background radio, PPSSPP game-audio mixing, in-game volume shortcuts, automatic game-volume reset, and interface behavior were confirmed during these tests. Compatibility with every emulator or other muOS-supported handheld has **not** been established.
 
@@ -60,7 +60,7 @@ Preferences are stored in the existing SDL settings file and survive OTA backups
 
 Existing Settings shortcuts remain: A applies the selected theme, START cycles in-game hotkeys, SELECT opens OTA updates, X clears cache, and Y clears history. L1/R1 still cycles the six main tabs; B returns from personalization to Settings. Beta 2.4.5 does not add YouTube Shorts; that is planned separately after UI validation.
 
-**Note:** Alternate layouts are optional and require testing on both handhelds. The source tests do not establish flawless display geometry or font readability on the real LCD.
+**Note:** Alternate layouts have been tested on RG35XX Plus and SP. The source tests do not establish flawless display geometry or font readability on the real LCD.
 
 ### Video playback
 

@@ -2,7 +2,7 @@ MustardTube v0.9.11 Beta 2.4.5 — SOURCE CODE INFORMATION
 
 SPDX-License-Identifier: GPL-3.0-only (relicensable first-party source)
 Official repository: https://github.com/PapaZolaRis/MustardTube
-Root license: licenses/LICENSE (complete GNU GPL version 3 text)
+Root license: LICENSE (complete GNU GPL version 3 text)
 First-party source included inside this installer as:
   source/MustardTube-v0.9.11-Beta2.4.5-Source.zip
 
