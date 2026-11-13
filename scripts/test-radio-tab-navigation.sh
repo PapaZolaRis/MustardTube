@@ -37,7 +37,7 @@ prefix=r'''#include <stdbool.h>
 #include <string.h>
 #include <assert.h>
 #define NAV_TAB_COUNT 6
-typedef enum { HOME,SEARCH,SAVED,RADIO,STYLE,ABOUT,PLAYER,RESULTS,RADIO_NOW,UPDATES,EXTRA } Page;
+typedef enum { HOME,SEARCH,SAVED,RADIO,STYLE,ABOUT,PLAYER,RESULTS,RADIO_NOW,UPDATES,EXTRA,PERSONALIZE } Page;
 typedef struct { Page page,from_page; char status_message[176]; bool radio_active; int directory_visits; } App;
 static bool radio_now_process_alive(App*a){return a->radio_active;}
 static void set_page(App*a,Page p){ a->page=p; if(p==RADIO)a->directory_visits++; }

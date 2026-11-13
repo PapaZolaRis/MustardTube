@@ -49,7 +49,7 @@ sidebar=function('draw_home_sidebar')
 assert 'if(a->page==RESULTS)active=SEARCH;' in sidebar
 assert 'if(a->page==RADIO_NOW)active=RADIO;' in sidebar
 mouse=function('mouse_down')
-assert 'if(x>=MT_SIDE_X+6' in mouse
+assert 'x>=MT_SIDE_X+6' in mouse
 assert 'open_nav_tab(a,(Page)tab)' in mouse
 for kind in ('RADIO','STYLE','SEARCH','SAVED','RESULTS'):
     assert 'a->page=='+kind in mouse

@@ -18,7 +18,7 @@ assert 'if(a->page==STYLE)open_updates(a);' in src
 assert 'cp scripts/youtube-backend.sh scripts/radio-backend.js scripts/background-radio.js scripts/ota-update.js' in build
 assert '"scripts/ota-update.js:scripts/ota-update.js"' in build
 assert 'OTA.muxapp' in build and 'SHA256SUMS.txt' in build
-assert 'MT_BETA "2.4.2"' in (root/'src/release.h').read_text()
+assert 'MT_BETA "2.4.5"' in (root/'src/release.h').read_text()
 for p in ['scripts/youtube-backend.sh','scripts/radio-backend.js','scripts/background-radio.js','src/game_mixer.c']:
  assert Path(root/p).is_file()
 print('PASS: Beta 2.4.0 UI, exit handoff, package and media-source invariants')

@@ -38,7 +38,7 @@ assert 'SDL_Texture *result_thumbs[RESULTS_VISIBLE]' in source
 assert '#define MT_HOME_CARD_H 54' in source
 assert '#define MT_HOME_W 477' in source
 assert 'static void draw_footer' in source and 'MT_FOOTER,530,453' in source
-assert 'MT_BETA "2.4.2"' in (root/'src/release.h').read_text()
+assert 'MT_BETA "2.4.5"' in (root/'src/release.h').read_text()
 
 # An RGBA muOS glyph must have transparent corners and opaque content in its
 # interior; a full opaque black tile is rendered as a white square by a

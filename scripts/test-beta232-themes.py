@@ -9,7 +9,7 @@ assert '"midnight", "forest", "paper", "acidbloom"' in s
 assert 'int x=MT_HOME_X+(i%2)*244,y=161+(i/2)*80;' in s
 assert 'a->style_idx=row*2+col;' in s
 assert 'MT_HOME_CARD_H 54' in s and 'MT_HOME_W 477' in s
-assert 'MT_BETA "2.4.2"' in (r/'src/release.h').read_text()
+assert 'MT_BETA "2.4.5"' in (r/'src/release.h').read_text()
 for name in ('midnight','forest','paper','acidbloom'):
     data=(r/'assets/themes'/f'{name}.theme').read_text()
     assert data.count('name=')==1 and f'name={"Acid Bloom" if name=="acidbloom" else name.title()}' in data

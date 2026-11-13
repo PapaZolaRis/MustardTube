@@ -18,5 +18,5 @@ assert "now-lastStatus>=500 || count===asset.size" in js
 assert 'a->page==UPDATES && SDL_GetTicks()-a->update_last_poll>=1000' in src
 assert 'UPDATE_DOWNLOAD_EXIT 89' in src and 'task=prepare' in launcher
 assert 'if(!strcmp(a->update_state,"checking") || !strcmp(a->update_state,"downloading")' in src
-assert 'MT_BETA "2.4.2"' in (root/'src/release.h').read_text()
+assert 'MT_BETA "2.4.5"' in (root/'src/release.h').read_text()
 print('PASS: Beta 2.4.2 OTA percent bar, error messages, stages, bounded UI updates and unchanged media layout')

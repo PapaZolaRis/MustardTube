@@ -26,7 +26,7 @@ assert 'Archive Manager performs the install' in src
 assert 'cp scripts/youtube-backend.sh scripts/radio-backend.js scripts/background-radio.js scripts/ota-update.js' in build
 assert '"scripts/ota-update.js:scripts/ota-update.js"' in build
 assert 'SHA256SUMS.txt' in build
-assert 'MT_BETA "2.4.2"' in (root/'src/release.h').read_text()
+assert 'MT_BETA "2.4.5"' in (root/'src/release.h').read_text()
 for p in ['scripts/youtube-backend.sh','scripts/radio-backend.js','scripts/background-radio.js',
           'src/game_mixer.c','assets/themes/midnight.theme','assets/themes/forest.theme',
           'assets/themes/paper.theme','assets/themes/acidbloom.theme']:

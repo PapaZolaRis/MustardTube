@@ -18,7 +18,7 @@ assert 'RADIO+GAME' in s and 'radio_hotkeys_toggle(a)' in s
 assert '#define SEARCH_RESULTS 120' in s
 assert '#define HOME_VIDEOS 4' in s
 assert 'RADIO_MAX_STATIONS' not in s and 'RadioStation *stations;' in s
-assert 'IN-GAME HOTKEYS' in s and 'INDEPENDENT RADIO VOLUME' not in s
+assert 'START  In-game hotkeys' in s and 'INDEPENDENT RADIO VOLUME' not in s
 assert 'radio_mix_edit' not in s
 assert 'Beta2.2.6a-DualMixer-StaleSessionFix' in pack
 assert 'single-press and hold-to-repeat' in pack

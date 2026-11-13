@@ -1,11 +1,13 @@
-# Current Beta 2.4.2 packaging workflow
+# Current Beta 2.4.5 packaging workflow
 
 Use the repository-root `build-package.sh` with the intact, verified
 Beta 2.2.7 `.muxapp` as its argument. The script runs source tests, rebuilds
 the first-party ARM64 GUI and hotkey helper, retains the baseline's bundled
-runtimes, and packages all four themes and the OTA update UI. Output files:
-`dist/MustardTube-v0.9.11-Beta2.4.2-OTA.muxapp`,
-`dist/MustardTube-v0.9.11-Beta2.4.2-Source.zip`, and
+runtimes, and packages all four themes, the OTA update UI and optional personalization.
+It also compiles and runs the host-only preference/reset regression harness.
+Beta 2.4.5 is not yet device-tested; keep Beta 2.4.2 available. Output files:
+`dist/MustardTube-v0.9.11-Beta2.4.5-OTA.muxapp`,
+`dist/MustardTube-v0.9.11-Beta2.4.5-Source.zip`, and
 `dist/SHA256SUMS.txt`.
 
 The baseline `.muxapp` is **not** part of this repository source archive;

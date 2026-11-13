@@ -4,7 +4,7 @@ Official releases: https://github.com/PapaZolaRis/MustardTube/releases
 
 ## Current installation policy
 
-Beta 2.4.2 checks for releases automatically at most once per day when enabled
+Beta 2.4.5 inherits the Beta 2.4.2 OTA updater and checks for releases automatically at most once per day when enabled
 (default on; configurable in Software updates). Checking makes no changes to
 the installed software. Downloading requires the user to select **Prepare
 verified update**. After preparation, the user exits and selects the package in
@@ -17,10 +17,10 @@ overwrite. Existing playback, radio and controller code is unchanged.
    before publicly distributing the GPLv3 installer.
 2. Hardware-test the version on RG35XX Plus and SP, including settings/favourites
    across a manual Archive Manager upgrade.
-3. Create a GitHub release with a matching tag, e.g. `v0.9.11-beta2.4.2`
+3. Create a GitHub release with a matching tag, e.g. `v0.9.11-beta2.4.5`
    (pre-release) or `v0.9.12` (stable).
 4. Upload a **versioned** asset, for example:
-   `MustardTube-v0.9.11-Beta2.4.2-OTA.muxapp` and the matching source ZIP.
+   `MustardTube-v0.9.11-Beta2.4.5-OTA.muxapp` and the matching source ZIP.
 5. GitHub Releases API must include `digest: "sha256:<64 hex digits>"` for the
    installer. Publish the generated `SHA256SUMS.txt` alongside the package.
 6. Never replace earlier MIT releases under an existing tag.
