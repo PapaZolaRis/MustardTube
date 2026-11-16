@@ -59,6 +59,12 @@ cp docs/SOURCE-ACCESS.txt "$app/licenses/SOURCE-ACCESS.txt"
 cp docs/THIRD-PARTY-LICENSE-REVIEW.md "$app/licenses/THIRD-PARTY-LICENSE-REVIEW.md"
 # Also ship attribution that the original package placed in the assets dir.
 cp assets/flags/ATTRIBUTION.txt "$app/licenses/TWEMOJI_ATTRIBUTION.txt"
+
+# Replace the baseline diagnostic media with the verified source asset.
+mkdir -p "$app/assets/media"
+cp assets/media/mustardtube-av-test.mp4 \
+   assets/media/AV-TEST-PROVENANCE.md \
+   "$app/assets/media/"
 chmod 755 "$app/mux_launch.sh" "$app/bin/mustardtube" "$app/bin/radio-hotkeys" "$app/scripts/youtube-backend.sh"
 chmod 644 "$app/scripts/background-radio.js" "$app/scripts/radio-backend.js" "$app/scripts/ota-update.js"
 # Supply exact first-party source/build scripts together with compiled installer.
