@@ -1,24 +1,31 @@
-# Bundled component and license audit (Beta 2.2.7 source + installer)
+# Bundled component and license audit (Beta 2.4.5 RC1)
 
 ## Source archive
 
 - `assets/flags/country-atlas.png`: based on Twemoji country flags, CC BY 4.0;
   attribution in `assets/flags/ATTRIBUTION.txt` must remain available.
-- `tools/FFPLAY_SOURCE.txt`: identifies FFmpeg 8.1.3 as the bundled `ffplay-radio`
-  source baseline. `FFPLAY_GPL_LICENSE.txt` and `FFPLAY_LGPL_LICENSE.txt`
-  are preserved, but their presence **does not establish** how the included
-  binary was configured or which component licenses actually apply.
-- `assets/media/mustardtube-av-test.mp4`: copyright/redistribution origin
-  not documented in the supplied source snapshot; verify before publication.
+- `tools/FFPLAY_SOURCE.txt`: identifies FFmpeg 8.1.3 as the bundled
+  `ffplay-radio` source baseline. The device-executed binary has been
+  checked using `-buildconf` and `-L`. It reports LGPL 2.1 or later;
+  neither `--enable-gpl` nor `--enable-nonfree` appears in its configuration.
+  Matching source availability, build instructions, and all applicable
+  redistribution obligations still require final verification.
+- `assets/media/mustardtube-av-test.mp4`: replaced for Beta 2.4.5 RC1
+  with a synthetic 10-second video/audio diagnostic generated using FFmpeg
+  testsrc2 and sine filters. No external footage or sound recording is used.
+  See `assets/media/AV-TEST-PROVENANCE.md` for the generation parameters
+  and SHA-256 checksum.
 - `assets/branding/`: icons cropped from the maintainer-approved artwork.
   Confirm distribution rights for the source concept if necessary.
 
 ## Bundled binary `.muxapp` baseline
 
-- `bin/ffplay-radio`: independent FFmpeg-derived player; verify exact build
-  configuration (`--enable-gpl`, linked libraries, external codecs), complete
-  matching source, build options and required license notices. The FFmpeg
-  license text files do not establish binary compliance by themselves.
+- `bin/ffplay-radio`: independent FFmpeg 8.1.3 player. Its device SHA-256
+  is c309cfbcc4b02208384ea944564802ae0a35e3ec9ed9c1e8d10d8b2e12a8d86b.
+  Its reported license is LGPL 2.1 or later. Build configuration and
+  shared-library dependencies were inspected on the RG35XX Plus.
+  Corresponding source, build instructions, license notices, and any
+  applicable relinking obligations remain subject to final review.
 - `bin/yt-dlp` and `bin/_internal/`: bundled onedir runtime, including Python
   packages and native libraries. Retain `YT_DLP_THIRD_PARTY_LICENSES.txt`,
   `_internal/THIRD_PARTY_LICENSES.txt`, metadata, and all bundled notices;
@@ -36,11 +43,16 @@
 
 ## Release blockers
 
-A matching FFmpeg/ffplay source package and build/configuration evidence
-are **not included** in the supplied source ZIP. The `.muxapp` archive
-contains FFmpeg license notices but not the entire player source. Other
-bundled runtimes must also be audited against matching source and notices.
-The actual Git history is unavailable for contributor rights verification.
+The matching FFmpeg 8.1.3 source archive has been obtained in the
+maintainer's release-audit workspace, and the compiled binary's reported
+configuration and license have been verified on hardware. The source
+archive is not yet included in the release deliverables.
+
+Complete corresponding-source availability, applicable relinking
+requirements, and third-party notices must be reviewed for all bundled
+components, including the yt-dlp onedir runtime and its native dependencies.
+Branding and contributor distribution rights also require final confirmation.
+
 **Do not mark distribution compliance as complete until verified.**
 
 Do not edit or relicense third-party binaries just to change displayed text.
